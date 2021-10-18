@@ -19,17 +19,17 @@ import { createState, useSelector } from 'react-tagged-state';
 const counterState = createState(0);
 
 const Example = () => {
-  const counter = useSelector(counterState);
+    const counter = useSelector(counterState);
 
-  return (
-    <button
-      onClick={() => {
-        counterState((value) => value + 1);
-      }}
-    >
-      {counter}
-    </button>
-  );
+    return (
+        <button
+            onClick={() => {
+                counterState((value) => value + 1);
+            }}
+        >
+            {counter}
+        </button>
+    );
 };
 ```
 
@@ -37,19 +37,19 @@ That's it. You already know how use it 💪
 
 ## Pros
 
-- Fast
-- Reactive
-- Atomic
-- No dispatch
-- No Proxy
-- No Providers or HOCs
-- No actions or reducers
-- Ready for [`Concurrent Mode`](https://github.com/dai-shi/will-this-react-global-state-work-in-concurrent-mode#results)
-- Tiny (~1kb minified+gzipped)
+-   Fast
+-   Reactive
+-   Atomic
+-   No dispatch
+-   No Proxy
+-   No Providers or HOCs
+-   No actions or reducers
+-   Ready for [`Concurrent Mode`](https://github.com/dai-shi/will-this-react-global-state-work-in-concurrent-mode#results)
+-   Tiny (~1kb minified+gzipped)
 
 ## Main concept
 
-**React Tagged State** main concept is  a [`states`](#state) - it's a functions which can "get" value and "set" value  itself. You don't need to create actions, reducers or events for just "set" your state value. Also, you don't need to call `getState` method or call some `get` function for "get" current state value.
+**React Tagged State** main concept is a [`states`](#state) - it's a functions which can "get" value and "set" value itself. You don't need to create actions, reducers or events for just "set" your state value. Also, you don't need to call `getState` method or call some `get` function for "get" current state value.
 Just call `state()` without arguments for "get" value and call `state(newValue)` with new value for "set" value.
 
 **React Tagged State** provide just one hook - `useSelector` - a "computed for components". It's like **react-redux** `useSelector`, but also it tracks what states you read inside selector and call selector only if this states changed.
@@ -78,29 +78,29 @@ Returns [`state`](#state) (like [**S.js**](https://github.com/adamhaile/S) [sign
 
 You can use it for:
 
-- "get" value (call without arguments)
+-   "get" value (call without arguments)
 
     ```javascript
     const counter = counterState();
     ```
 
-- "set" value (call with `updaters` arguments)
+-   "set" value (call with `updaters` arguments)
 
     ```javascript
     // with value
     counterState(1000);
-    
+
     // with function
     counterState((counter) => counter + 1);
     ```
 
-- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
-  
+-   "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
+
     ```javascript
     counterState``((counter) => console.log(counter));
     ```
 
-___
+---
 
 ### createComputed: (selector) => computed
 
@@ -116,19 +116,19 @@ Returns [`computed`](#computed)
 
 You can use it for:
 
-- "get" value (call without arguments)
+-   "get" value (call without arguments)
 
     ```javascript
     const doubledCounter = doubledCounterComputed();
     ```
 
-- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
+-   "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
 
     ```javascript
     doubledCounterComputed``((doubledCounter) => console.log(doubledCounter));
     ```
 
-___
+---
 
 ### createEvent: () => event
 
@@ -144,36 +144,35 @@ Returns [`event`](#event)
 
 You can use it for:
 
-- "dispatch" payload
+-   "dispatch" payload
 
     ```javascript
     resetEvent('counter');
     ```
 
-- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
+-   "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
 
     ```javascript
     resetEvent``((name) => console.log(name));
     ```
 
-___
+---
 
 ### createEffect: (effect) => cleanup
 
 ```javascript
 // start effect
 const cleanup = createEffect(() => {
-  console.log(counterState());
+    console.log(counterState());
 });
 
 // clear effect
 cleanup();
-
 ```
 
 Params:
 
-- `effect: ()  => any`
+-   `effect: () => any`
 
 Returns `function` that clear effect
 
@@ -183,19 +182,19 @@ Returns `function` that clear effect
 createEffect(() => console.log(counterState()));
 ```
 
-___
+---
 
 ### useSelector: (selector, deps?) => value
 
 `useSelector` is a [React](https://reactjs.org/) binding
 
-- Call `selector` anytime when state parts that `selector` reads changed or `selector` changed itself
-- Re-render component anytime when `value` that `selector` returns changed
+-   Call `selector` anytime when state parts that `selector` reads changed or `selector` changed itself
+-   Re-render component anytime when `value` that `selector` returns changed
 
 Params:
 
-- `selector: ()  => any`
-- `deps?: DependencyList` - `selector` memo deps, `[]` by default
+-   `selector: () => any`
+-   `deps?: DependencyList` - `selector` memo deps, `[]` by default
 
 Returns `value` that `selector` returns
 
@@ -205,17 +204,17 @@ import { createState, useSelector } from 'react-tagged-state';
 const counterState = createState(0);
 
 const Example = () => {
-  const doubledCounter = useSelector(() => counterState() * 2);
+    const doubledCounter = useSelector(() => counterState() * 2);
 
-  return (
-    <button
-      onClick={() => {
-        counterState((value) => value + 1);
-      }}
-    >
-      {doubledCounter}
-    </button>
-  );
+    return (
+        <button
+            onClick={() => {
+                counterState((value) => value + 1);
+            }}
+        >
+            {doubledCounter}
+        </button>
+    );
 };
 ```
 
@@ -227,17 +226,17 @@ import { createState, useSelector } from 'react-tagged-state';
 const counterState = createState(0);
 
 const Example = () => {
-  const counter = useSelector(counterState);
+    const counter = useSelector(counterState);
 
-  return (
-    <button
-      onClick={() => {
-        counterState((value) => value + 1);
-      }}
-    >
-      {counter}
-    </button>
-  );
+    return (
+        <button
+            onClick={() => {
+                counterState((value) => value + 1);
+            }}
+        >
+            {counter}
+        </button>
+    );
 };
 ```
 
@@ -249,24 +248,21 @@ import { createState, useSelector } from 'react-tagged-state';
 const counterState = createState(0);
 
 const Example = ({ isDouble }) => {
-  const counter = useSelector(
-    () => isDouble ? counterState() * 2 : counterState(),
-    [isDouble]
-  );
+    const counter = useSelector(() => (isDouble ? counterState() * 2 : counterState()), [isDouble]);
 
-  return (
-    <button
-      onClick={() => {
-        counterState((value) => value + 1);
-      }}
-    >
-      {counter}
-    </button>
-  );
+    return (
+        <button
+            onClick={() => {
+                counterState((value) => value + 1);
+            }}
+        >
+            {counter}
+        </button>
+    );
 };
 ```
 
-___
+---
 
 ## Performance
 
@@ -276,6 +272,6 @@ See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework
 
 Browser should support [spread](https://caniuse.com/mdn-javascript_operators_spread_spread_in_object_literals):
 
-- Chrome: >= 60
-- Firefox: >= 55
-- Safari: >= 11.1
+-   Chrome: >= 60
+-   Firefox: >= 55
+-   Safari: >= 11.1

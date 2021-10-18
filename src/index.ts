@@ -44,13 +44,15 @@ export interface Event<Type> {
     (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<Callback<Type>>;
 }
 
-const createSubscribe = <Type>(subscribers: Set<Type>): Subscribe<Type> => (subscriber) => {
-    subscribers.add(subscriber);
+const createSubscribe =
+    <Type>(subscribers: Set<Type>): Subscribe<Type> =>
+    (subscriber) => {
+        subscribers.add(subscriber);
 
-    return () => {
-        subscribers.delete(subscriber);
+        return () => {
+            subscribers.delete(subscriber);
+        };
     };
-};
 
 const effectsSubscribers: Set<{ effect: Callback<void>; depsRef: DepsRef }> = new Set();
 

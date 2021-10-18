@@ -1,73 +1,74 @@
 {
-  "name": "react-tagged-state",
-  "version": "1.0.1",
-  "description": "⚛️ Reactive state manager",
-  "keywords": [
-    "react",
-    "tagged",
-    "state",
-    "manager",
-    "reactivity",
-    "redux",
-    "mobx",
-    "valtio"
-  ],
-  "homepage": "https://codesandbox.io/s/react-tagged-state-qco1t",
-  "license": "MIT",
-  "author": {
-    "name": "Oleg Grishechkin",
-    "email": "oleggrishechkin@gmail.com",
-    "url": "https://github.com/oleggrishechkin"
-  },
-  "files": [
-    "lib/*"
-  ],
-  "main": "lib/index.js",
-  "types": "lib/index.d.ts",
-  "repository": {
-    "type": "git",
-    "url": "https://github.com/oleggrishechkin/react-tagged-state"
-  },
-  "scripts": {
-    "lint": "eslint --quiet .",
-    "lint:fix": "eslint --quiet --fix .",
-    "prettier:fix": "prettier --write .",
-    "prepare": "husky install && rimraf lib && tsc"
-  },
-  "devDependencies": {
-    "@types/react": "^17.0.2",
-    "@types/react-dom": "^17.0.2",
-    "configs-og": "^3.0.7",
-    "eslint": "^7.32.0",
-    "husky": "^7.0.2",
-    "lint-staged": "^11.2.3",
-    "prettier": "^2.4.1",
-    "react": "^17.0.1",
-    "rimraf": "^3.0.2",
-    "typescript": "^4.2.2"
-  },
-  "peerDependencies": {
-    "react": ">=16.8.0"
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
+    "name": "react-tagged-state",
+    "version": "1.0.2",
+    "description": "⚛️ Reactive state manager",
+    "keywords": [
+        "react",
+        "tagged",
+        "state",
+        "manager",
+        "reactivity",
+        "redux",
+        "mobx",
+        "valtio"
     ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "eslintConfig": {
-    "extends": [
-      "./node_modules/configs-og/.eslintrc.js"
-    ]
-  },
-  "prettier": "configs-og/prettier.config.js",
-  "lint-staged": {
-    "*.(js|jsx|ts|tsx)": "eslint --quiet"
-  }
+    "homepage": "https://codesandbox.io/s/react-tagged-state-qco1t",
+    "license": "MIT",
+    "author": {
+        "name": "Oleg Grishechkin",
+        "email": "oleggrishechkin@gmail.com",
+        "url": "https://github.com/oleggrishechkin"
+    },
+    "files": [
+        "lib/*"
+    ],
+    "main": "lib/index.js",
+    "types": "lib/index.d.ts",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/oleggrishechkin/react-tagged-state"
+    },
+    "scripts": {
+        "lint": "eslint --quiet .",
+        "lint:fix": "eslint --quiet --fix .",
+        "prettier:fix": "prettier --write .",
+        "prepare": "husky install && rimraf lib && tsc"
+    },
+    "devDependencies": {
+        "@types/react": "^17.0.2",
+        "@types/react-dom": "^17.0.2",
+        "babel-eslint": "^10.1.0",
+        "configs-og": "^3.0.7",
+        "eslint": "^7.32.0",
+        "husky": "^7.0.2",
+        "lint-staged": "^11.2.3",
+        "prettier": "^2.4.1",
+        "react": "^17.0.1",
+        "rimraf": "^3.0.2",
+        "typescript": "^4.2.2"
+    },
+    "peerDependencies": {
+        "react": ">=16.8.0"
+    },
+    "browserslist": {
+        "production": [
+            ">0.2%",
+            "not dead",
+            "not op_mini all"
+        ],
+        "development": [
+            "last 1 chrome version",
+            "last 1 firefox version",
+            "last 1 safari version"
+        ]
+    },
+    "eslintConfig": {
+        "extends": [
+            "./node_modules/configs-og/.eslintrc.js"
+        ]
+    },
+    "prettier": "configs-og/prettier.config.js",
+    "lint-staged": {
+        "*.(js|jsx|ts|tsx)": "eslint --quiet"
+    }
 }
