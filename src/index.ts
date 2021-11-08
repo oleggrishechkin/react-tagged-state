@@ -1,47 +1,11 @@
 import { useEffect, useRef, useState, DependencyList, useMemo } from 'react';
 
-type DepKey = number | string;
-
-type Deps = Record<DepKey, boolean>;
+type Deps = Record<number, boolean>;
 
 type DepsRef = { current: Deps | undefined };
 
-export interface Callback<Type> {
-    (payload: Type): any;
-}
-
-export interface Cleanup {
-    (): void;
-}
-
-export interface Effect {
-    (): any;
-}
-
-export interface Selector<Type> {
-    (): Type;
-}
-
-export interface Subscribe<Type> {
-    (subscriber: Type): Cleanup;
-}
-
-export type Updater<Type> = ((value: Type) => Type) | Type;
-
-export interface State<Type> {
-    (): Type;
-    (updater: Updater<Type>): void;
-    (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<Callback<Type>>;
-}
-
-export interface Computed<Type> {
-    (): Type;
-    (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<Callback<Type>>;
-}
-
-export interface Event<Type> {
-    (payload: Type): void;
-    (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<Callback<Type>>;
+interface Subscribe<Type> {
+    (subscriber: Type): () => void;
 }
 
 const createSubscribe =
@@ -54,7 +18,7 @@ const createSubscribe =
         };
     };
 
-const effectsSubscribers: Set<{ effect: Callback<void>; depsRef: DepsRef }> = new Set();
+const effectsSubscribers: Set<{ effect: () => void; depsRef: DepsRef }> = new Set();
 
 const effectsSubscribe = createSubscribe(effectsSubscribers);
 
@@ -62,7 +26,7 @@ let batchedDeps: Deps = {};
 
 let batchPromise: Promise<void> | null = null;
 
-const notifyEffectsSubscribers = (key: DepKey): void => {
+const notifyEffectsSubscribers = (key: number): void => {
     batchedDeps[key] = true;
 
     if (batchPromise) {
@@ -75,11 +39,11 @@ const notifyEffectsSubscribers = (key: DepKey): void => {
         batchedDeps = {};
         batchPromise = null;
 
-        let batchedDepKey;
+        let batchedDepsCopyKey;
 
         effectsSubscribers.forEach(({ effect, depsRef }) => {
-            for (batchedDepKey in batchedDepsCopy) {
-                if (depsRef.current?.[batchedDepKey]) {
+            for (batchedDepsCopyKey in batchedDepsCopy) {
+                if (depsRef.current?.[batchedDepsCopyKey]) {
                     effect();
 
                     break;
@@ -89,9 +53,9 @@ const notifyEffectsSubscribers = (key: DepKey): void => {
     });
 };
 
-let globalDeps: Deps | null = null;
+const flush = (): Promise<void> => batchPromise || Promise.resolve();
 
-let uniqueNumber = 0;
+let globalDeps: Deps | null = null;
 
 const callWithDeps = <Type>(func: () => Type, depsRef: DepsRef): Type => {
     globalDeps = depsRef.current = {};
@@ -103,8 +67,16 @@ const callWithDeps = <Type>(func: () => Type, depsRef: DepsRef): Type => {
     return result;
 };
 
-export const createState = <Type>(initialState: Type): State<Type> => {
-    const subscribers: Set<Callback<Type>> = new Set();
+interface State<Type> {
+    (): Type;
+    (updater: ((value: Type) => Type) | Type): void;
+    (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<(payload: Type) => any>;
+}
+
+let uniqueNumber = 0;
+
+const createState = <Type>(initialState: Type): State<Type> => {
+    const subscribers: Set<(payload: Type) => any> = new Set();
     const subscribe = createSubscribe(subscribers);
     const key = ++uniqueNumber;
     let state = initialState;
@@ -134,9 +106,14 @@ export const createState = <Type>(initialState: Type): State<Type> => {
     };
 };
 
-export const createComputed = <Type>(selector: Selector<Type>): Computed<Type> => {
+interface Computed<Type> {
+    (): Type;
+    (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<(payload: Type) => any>;
+}
+
+const createComputed = <Type>(selector: Selector<Type>): Computed<Type> => {
     const depsRef: DepsRef = { current: {} };
-    const subscribers: Set<Callback<Type>> = new Set();
+    const subscribers: Set<(payload: Type) => any> = new Set();
     const subscribe = createSubscribe(subscribers);
     const key = ++uniqueNumber;
     let computed = callWithDeps(selector, depsRef);
@@ -171,8 +148,13 @@ export const createComputed = <Type>(selector: Selector<Type>): Computed<Type> =
     };
 };
 
-export const createEvent = <Type = void>(): Event<Type> => {
-    const subscribers: Set<Callback<Type>> = new Set();
+interface Event<Type> {
+    (payload: Type): void;
+    (strings: TemplateStringsArray, ...keys: Array<string | number>): Subscribe<(payload: Type) => any>;
+}
+
+const createEvent = <Type = void>(): Event<Type> => {
+    const subscribers: Set<(payload: Type) => any> = new Set();
     const subscribe = createSubscribe(subscribers);
 
     return (...args: any[]): any => {
@@ -186,7 +168,11 @@ export const createEvent = <Type = void>(): Event<Type> => {
     };
 };
 
-export const createEffect = (effect: Effect): Cleanup => {
+interface Effect {
+    (): void;
+}
+
+const createEffect = (effect: Effect): (() => void) => {
     const depsRef: DepsRef = { current: {} };
 
     callWithDeps(effect, depsRef);
@@ -199,7 +185,11 @@ export const createEffect = (effect: Effect): Cleanup => {
     });
 };
 
-export const useSelector = <Type>(
+interface Selector<Type> {
+    (): Type;
+}
+
+const useSelector = <Type>(
     selector: Selector<Type> | State<Type> | Computed<Type>,
     deps: DependencyList = []
 ): Type => {
@@ -237,4 +227,19 @@ export const useSelector = <Type>(
     }
 
     return state.value;
+};
+
+export {
+    Subscribe,
+    State,
+    Computed,
+    Event,
+    Effect,
+    Selector,
+    flush,
+    createState,
+    createComputed,
+    createEvent,
+    createEffect,
+    useSelector
 };
