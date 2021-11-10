@@ -44,11 +44,13 @@ const notifyEffectsSubscribers = (key: number): void => {
         const length = effectsSubscribers.length;
 
         for (; index < length; ++index) {
-            for (batchedDepsCopyKey in batchedDepsCopy) {
-                if (effectsSubscribers[index].depsRef.current[batchedDepsCopyKey]) {
-                    effectsSubscribers[index].effect();
+            if (effectsSubscribers[index]) {
+                for (batchedDepsCopyKey in batchedDepsCopy) {
+                    if (effectsSubscribers[index].depsRef.current[batchedDepsCopyKey]) {
+                        effectsSubscribers[index].effect();
 
-                    break;
+                        break;
+                    }
                 }
             }
         }
