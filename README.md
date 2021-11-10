@@ -44,7 +44,6 @@ That's it. You already know how use it 💪
 -   No Proxy
 -   No Providers or HOCs
 -   No actions or reducers
--   Ready for [`Concurrent Mode`](https://github.com/dai-shi/will-this-react-global-state-work-in-concurrent-mode#results)
 -   Tiny (~1kb minified+gzipped)
 
 ## Main concept
@@ -184,7 +183,7 @@ createEffect(() => console.log(counterState()));
 
 ---
 
-### useSelector: (selector, deps?) => value
+### useSelector: (selector) => value
 
 `useSelector` is a [React](https://reactjs.org/) binding
 
@@ -194,7 +193,6 @@ createEffect(() => console.log(counterState()));
 Params:
 
 -   `selector: () => any`
--   `deps?: DependencyList` - `selector` memo deps, `[]` by default
 
 Returns `value` that `selector` returns
 
@@ -227,28 +225,6 @@ const counterState = createState(0);
 
 const Example = () => {
     const counter = useSelector(counterState);
-
-    return (
-        <button
-            onClick={() => {
-                counterState((value) => value + 1);
-            }}
-        >
-            {counter}
-        </button>
-    );
-};
-```
-
-When `selector` based on props or other variables you should use `deps` param
-
-```javascript
-import { createState, useSelector } from 'react-tagged-state';
-
-const counterState = createState(0);
-
-const Example = ({ isDouble }) => {
-    const counter = useSelector(() => (isDouble ? counterState() * 2 : counterState()), [isDouble]);
 
     return (
         <button

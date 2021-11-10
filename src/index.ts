@@ -1,24 +1,24 @@
-import { useEffect, useRef, useState, DependencyList, useMemo } from 'react';
+import { useEffect, useState } from 'react';
 
 type Deps = Record<number, boolean>;
 
-type DepsRef = { current: Deps | undefined };
+type DepsRef = { current: Deps };
 
 interface Subscribe<Type> {
     (subscriber: Type): () => void;
 }
 
 const createSubscribe =
-    <Type>(subscribers: Set<Type>): Subscribe<Type> =>
+    <Type>(subscribers: Type[]): Subscribe<Type> =>
     (subscriber) => {
-        subscribers.add(subscriber);
+        subscribers.push(subscriber);
 
         return () => {
-            subscribers.delete(subscriber);
+            subscribers.splice(subscribers.indexOf(subscriber), 1);
         };
     };
 
-const effectsSubscribers: Set<{ effect: () => void; depsRef: DepsRef }> = new Set();
+const effectsSubscribers: Array<{ effect: () => void; depsRef: DepsRef }> = [];
 
 const effectsSubscribe = createSubscribe(effectsSubscribers);
 
@@ -40,32 +40,24 @@ const notifyEffectsSubscribers = (key: number): void => {
         batchPromise = null;
 
         let batchedDepsCopyKey;
+        let index = 0;
+        const length = effectsSubscribers.length;
 
-        effectsSubscribers.forEach(({ effect, depsRef }) => {
+        for (; index < length; ++index) {
             for (batchedDepsCopyKey in batchedDepsCopy) {
-                if (depsRef.current?.[batchedDepsCopyKey]) {
-                    effect();
+                if (effectsSubscribers[index].depsRef.current[batchedDepsCopyKey]) {
+                    effectsSubscribers[index].effect();
 
                     break;
                 }
             }
-        });
+        }
     });
 };
 
 const flush = (): Promise<void> => batchPromise || Promise.resolve();
 
 let globalDeps: Deps | null = null;
-
-const callWithDeps = <Type>(func: () => Type, depsRef: DepsRef): Type => {
-    globalDeps = depsRef.current = {};
-
-    const result = func();
-
-    globalDeps = null;
-
-    return result;
-};
 
 interface State<Type> {
     (): Type;
@@ -76,7 +68,7 @@ interface State<Type> {
 let uniqueNumber = 0;
 
 const createState = <Type>(initialState: Type): State<Type> => {
-    const subscribers: Set<(payload: Type) => any> = new Set();
+    const subscribers: Array<(payload: Type) => any> = [];
     const subscribe = createSubscribe(subscribers);
     const key = ++uniqueNumber;
     let state = initialState;
@@ -98,12 +90,27 @@ const createState = <Type>(initialState: Type): State<Type> => {
 
         if (nextState !== state) {
             state = nextState;
-            subscribers.forEach((callback) => {
-                callback(state);
-            });
+
+            let index = 0;
+            const length = subscribers.length;
+
+            for (; index < length; ++index) {
+                subscribers[index](nextState);
+            }
+
             notifyEffectsSubscribers(key);
         }
     };
+};
+
+const callWithDeps = <Type>(func: () => Type, depsRef: DepsRef): Type => {
+    globalDeps = depsRef.current = {};
+
+    const result = func();
+
+    globalDeps = null;
+
+    return result;
 };
 
 interface Computed<Type> {
@@ -113,7 +120,7 @@ interface Computed<Type> {
 
 const createComputed = <Type>(selector: Selector<Type>): Computed<Type> => {
     const depsRef: DepsRef = { current: {} };
-    const subscribers: Set<(payload: Type) => any> = new Set();
+    const subscribers: Array<(payload: Type) => any> = [];
     const subscribe = createSubscribe(subscribers);
     const key = ++uniqueNumber;
     let computed = callWithDeps(selector, depsRef);
@@ -124,9 +131,14 @@ const createComputed = <Type>(selector: Selector<Type>): Computed<Type> => {
 
             if (nextValue !== computed) {
                 computed = nextValue;
-                subscribers.forEach((callback) => {
-                    callback(computed);
-                });
+
+                let index = 0;
+                const length = subscribers.length;
+
+                for (; index < length; ++index) {
+                    subscribers[index](nextValue);
+                }
+
                 notifyEffectsSubscribers(key);
             }
         },
@@ -154,7 +166,7 @@ interface Event<Type> {
 }
 
 const createEvent = <Type = void>(): Event<Type> => {
-    const subscribers: Set<(payload: Type) => any> = new Set();
+    const subscribers: Array<(payload: Type) => any> = [];
     const subscribe = createSubscribe(subscribers);
 
     return (...args: any[]): any => {
@@ -162,9 +174,12 @@ const createEvent = <Type = void>(): Event<Type> => {
             return subscribe;
         }
 
-        subscribers.forEach((callback) => {
-            callback(args[0]);
-        });
+        let index = 0;
+        const length = subscribers.length;
+
+        for (; index < length; ++index) {
+            subscribers[index](args[0]);
+        }
     };
 };
 
@@ -189,41 +204,35 @@ interface Selector<Type> {
     (): Type;
 }
 
-const useSelector = <Type>(
-    selector: Selector<Type> | State<Type> | Computed<Type>,
-    deps: DependencyList = []
-): Type => {
-    const memoizedSelector = useMemo(() => selector, deps);
-    const depsRef = useRef<Deps>();
-    const [state, setState] = useState<{ value: Type; selector: Selector<Type> | State<Type> | Computed<Type> }>(
-        () => ({
-            value: callWithDeps(memoizedSelector, depsRef),
-            selector: memoizedSelector
-        })
-    );
+const useSelector = <Type>(selector: Selector<Type> | State<Type> | Computed<Type>): Type => {
+    const [{ state }, setState] = useState(() => {
+        const depsRef = { current: {} };
+
+        return {
+            state: { value: callWithDeps(selector, depsRef), selector, depsRef }
+        };
+    });
 
     useEffect(
         () =>
             effectsSubscribe({
                 effect: () => {
-                    const nextValue = callWithDeps(memoizedSelector, depsRef);
+                    const nextValue = callWithDeps(state.selector, state.depsRef);
 
-                    setState((prevState) => {
-                        if (memoizedSelector !== prevState.selector || nextValue === prevState.value) {
-                            return prevState;
-                        }
-
-                        return { value: nextValue, selector: memoizedSelector };
-                    });
+                    if (nextValue !== state.value) {
+                        state.value = nextValue;
+                        setState({ state });
+                    }
                 },
-                depsRef
+                depsRef: state.depsRef
             }),
-        [memoizedSelector]
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        []
     );
 
-    if (memoizedSelector !== state.selector) {
-        state.value = callWithDeps(memoizedSelector, depsRef);
-        state.selector = memoizedSelector;
+    if (state.selector !== selector) {
+        state.selector = selector;
+        state.value = callWithDeps(state.selector, state.depsRef);
     }
 
     return state.value;
