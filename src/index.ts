@@ -8,53 +8,50 @@ interface Subscribe<Type> {
     (subscriber: Type): () => void;
 }
 
-const createSubscribe =
-    <Type>(subscribers: Type[]): Subscribe<Type> =>
-    (subscriber) => {
-        subscribers.push(subscriber);
+const createSubscription = <Type>() => {
+    const subscribers = new Set<Type>();
+    const subscribe = (subscriber: Type) => {
+        subscribers.add(subscriber);
 
         return () => {
-            subscribers.splice(subscribers.indexOf(subscriber), 1);
+            subscribers.delete(subscriber);
         };
     };
 
-const effectsSubscribers: Array<{ effect: () => void; depsRef: DepsRef }> = [];
+    return [subscribers, subscribe] as const;
+};
 
-const effectsSubscribe = createSubscribe(effectsSubscribers);
+const [effectsSubscribers, effectsSubscribe] = createSubscription<{ effect: () => void; depsRef: DepsRef }>();
 
 let batchedDeps: Deps = {};
 
 let batchPromise: Promise<void> | null = null;
 
-const notifyEffectsSubscribers = (key: number): void => {
+const notifyEffectsSubscribers = () => {
+    const batchedDepsCopy = batchedDeps;
+
+    batchedDeps = {};
+    batchPromise = null;
+
+    effectsSubscribers.forEach(({ effect, depsRef }) => {
+        for (const batchedDepsCopyKey in batchedDepsCopy) {
+            if (depsRef.current[batchedDepsCopyKey]) {
+                effect();
+
+                break;
+            }
+        }
+    });
+};
+
+const batchNotifyEffectSubscribers = (key: number): void => {
     batchedDeps[key] = true;
 
     if (batchPromise) {
         return;
     }
 
-    batchPromise = Promise.resolve().then(() => {
-        const batchedDepsCopy = batchedDeps;
-
-        batchedDeps = {};
-        batchPromise = null;
-
-        let batchedDepsCopyKey;
-        let index = 0;
-        const length = effectsSubscribers.length;
-
-        for (; index < length; ++index) {
-            if (effectsSubscribers[index]) {
-                for (batchedDepsCopyKey in batchedDepsCopy) {
-                    if (effectsSubscribers[index].depsRef.current[batchedDepsCopyKey]) {
-                        effectsSubscribers[index].effect();
-
-                        break;
-                    }
-                }
-            }
-        }
-    });
+    batchPromise = Promise.resolve().then(notifyEffectsSubscribers);
 };
 
 const flush = (): Promise<void> => batchPromise || Promise.resolve();
@@ -70,8 +67,7 @@ interface State<Type> {
 let uniqueNumber = 0;
 
 const createState = <Type>(initialState: Type): State<Type> => {
-    const subscribers: Array<(payload: Type) => any> = [];
-    const subscribe = createSubscribe(subscribers);
+    const [subscribers, subscribe] = createSubscription<(payload: Type) => void>();
     const key = ++uniqueNumber;
     let state = initialState;
 
@@ -92,15 +88,8 @@ const createState = <Type>(initialState: Type): State<Type> => {
 
         if (nextState !== state) {
             state = nextState;
-
-            let index = 0;
-            const length = subscribers.length;
-
-            for (; index < length; ++index) {
-                subscribers[index](nextState);
-            }
-
-            notifyEffectsSubscribers(key);
+            subscribers.forEach((callback) => callback(state));
+            batchNotifyEffectSubscribers(key);
         }
     };
 };
@@ -122,8 +111,7 @@ interface Computed<Type> {
 
 const createComputed = <Type>(selector: Selector<Type>): Computed<Type> => {
     const depsRef: DepsRef = { current: {} };
-    const subscribers: Array<(payload: Type) => any> = [];
-    const subscribe = createSubscribe(subscribers);
+    const [subscribers, subscribe] = createSubscription<(payload: Type) => void>();
     const key = ++uniqueNumber;
     let computed = callWithDeps(selector, depsRef);
 
@@ -133,32 +121,23 @@ const createComputed = <Type>(selector: Selector<Type>): Computed<Type> => {
 
             if (nextValue !== computed) {
                 computed = nextValue;
-
-                let index = 0;
-                const length = subscribers.length;
-
-                for (; index < length; ++index) {
-                    subscribers[index](nextValue);
-                }
-
-                notifyEffectsSubscribers(key);
+                subscribers.forEach((callback) => callback(computed));
+                batchNotifyEffectSubscribers(key);
             }
         },
         depsRef
     });
 
     return (...args: any[]): any => {
-        if (!args.length) {
-            if (globalDeps) {
-                globalDeps[key] = true;
-            }
-
-            return computed;
-        }
-
         if (args[0]?.raw) {
             return subscribe;
         }
+
+        if (globalDeps) {
+            globalDeps[key] = true;
+        }
+
+        return computed;
     };
 };
 
@@ -168,20 +147,16 @@ interface Event<Type> {
 }
 
 const createEvent = <Type = void>(): Event<Type> => {
-    const subscribers: Array<(payload: Type) => any> = [];
-    const subscribe = createSubscribe(subscribers);
+    const [subscribers, subscribe] = createSubscription<(payload: Type) => void>();
 
     return (...args: any[]): any => {
         if (args[0]?.raw) {
             return subscribe;
         }
 
-        let index = 0;
-        const length = subscribers.length;
+        const payload = args[0];
 
-        for (; index < length; ++index) {
-            subscribers[index](args[0]);
-        }
+        subscribers.forEach((callback) => callback(payload));
     };
 };
 
@@ -195,9 +170,7 @@ const createEffect = (effect: Effect): (() => void) => {
     callWithDeps(effect, depsRef);
 
     return effectsSubscribe({
-        effect: () => {
-            callWithDeps(effect, depsRef);
-        },
+        effect: () => callWithDeps(effect, depsRef),
         depsRef
     });
 };
