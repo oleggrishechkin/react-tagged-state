@@ -9,49 +9,56 @@
 
 ⚛️ Reactive state manager
 
-Easy-to-use super light-weight global state management solution for [React](https://reactjs.org/)
+Easy-to-use super light-weight global state management solution for _React_
+
+- Fast 🚀
+- Reactive ⚛️
+- Atomic 🧬
 
 ## Usage
 
 ```javascript
-import { createState, useSelector } from 'react-tagged-state';
+import {
+  createState,
+  useSelector,
+  observer
+} from 'react-tagged-state';
 
 const counterState = createState(0);
 
+// with hooks
 const Example = () => {
-    const counter = useSelector(counterState);
+  const counter = useSelector(counterState);
 
-    return (
-        <button
-            onClick={() => {
-                counterState((value) => value + 1);
-            }}
-        >
-            {counter}
-        </button>
-    );
+  return (
+    <button
+      onClick={() => {
+        counterState((value) => value + 1);
+      }}
+    >
+      {counter}
+    </button>
+  );
 };
+
+// with HOC
+const Example = observer(() => (
+  <button
+    onClick={() => {
+      counterState((value) => value + 1);
+    }}
+  >
+    {counterState()}
+  </button>
+));
 ```
 
 That's it. You already know how use it 💪
 
-## Pros
-
--   Fast
--   Reactive
--   Atomic
--   No dispatch
--   No Proxy
--   No Providers or HOCs
--   No actions or reducers
--   Tiny (~1kb minified+gzipped)
-
 ## Main concept
 
-**React Tagged State** main concept is a [`states`](#state) - it's a functions which can "get" value and "set" value itself. You don't need to create actions, reducers or events for just "set" your state value. Also, you don't need to call `getState` method or call some `get` function for "get" current state value.
-Just call `state()` without arguments for "get" value and call `state(newValue)` with new value for "set" value.
-
-**React Tagged State** provide just one hook - `useSelector` - a "computed for components". It's like **react-redux** `useSelector`, but also it tracks what states you read inside selector and call selector only if this states changed.
+- Based on [signals](https://github.com/adamhaile/S#data-signals) inspired by _solid-js_ and _S.js_, so you only need one function for a state value "get" or "set".
+- Connects with _React_ by `useSelector` (like _react-redux_) hook and `observer` HOC (like _mobx-react_). You can use both in the same time.
 
 ## Installation
 
@@ -64,190 +71,300 @@ npm install --save react-tagged-state
 ### createState: (initialState) => state
 
 ```javascript
-const initialState = 0;
+// With value
+const counterState = createState(0);
 
-const counterState = createState(initialState);
+// With function
+const anotherCounterState = createState(() => 0);
 ```
 
-Returns [`state`](#state) (like [**S.js**](https://github.com/adamhaile/S) [signals](https://github.com/adamhaile/S#data-signals))
+Params:
+
+- `initialState: () => any | any`
+
+Returns:
+
+- `state: State<any>`
 
 ### state
 
-`state` is a [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)
+it's [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates).
 
 You can use it for:
 
--   "get" value (call without arguments)
-
-    ```javascript
-    const counter = counterState();
-    ```
-
--   "set" value (call with `updaters` arguments)
-
-    ```javascript
-    // with value
-    counterState(1000);
-
-    // with function
-    counterState((counter) => counter + 1);
-    ```
-
--   "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
-
-    ```javascript
-    counterState``((counter) => console.log(counter));
-    ```
-
----
-
-### createComputed: (selector) => computed
+- "get" value (call without arguments).
 
 ```javascript
-const doubledCounterComputed = createComputed(() => counterState() * 2);
+import { counterState } from 'react-tagged-state';
+
+const counterState = createState(0);
+
+const counter = counterState();
 ```
 
-Returns [`computed`](#computed)
+- "set" value (call with `updaters` arguments).
 
-### computed
+```javascript
+import { counterState } from 'react-tagged-state';
 
-`computed` is a [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)
+const counterState = createState(0);
 
-You can use it for:
+// With value
+counterState(1000);
 
--   "get" value (call without arguments)
+// With function
+counterState((counter) => counter + 1);
+```
 
-    ```javascript
-    const doubledCounter = doubledCounterComputed();
-    ```
+- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)).
 
--   "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
+```javascript
+import { counterState } from 'react-tagged-state';
 
-    ```javascript
-    doubledCounterComputed``((doubledCounter) => console.log(doubledCounter));
-    ```
+const counterState = createState(0);
+
+counterState``((counter) => {
+  console.log(counter);
+});
+```
 
 ---
 
 ### createEvent: () => event
 
-```javascript
+```typescript
 const resetEvent = createEvent();
 ```
 
-Returns [`event`](#event)
+~~Params:~~
+
+Returns:
+
+- `event: Event<any>`
 
 ### event
 
-`event` is a [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)
+It's [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates).
 
 You can use it for:
 
--   "dispatch" payload
+- "dispatch" payload.
 
-    ```javascript
-    resetEvent('counter');
-    ```
+```javascript
+import { createEvent } from 'react-tagged-state';
 
--   "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates))
+const resetEvent = createEvent();
 
-    ```javascript
-    resetEvent``((name) => console.log(name));
-    ```
+resetEvent('counter');
+```
+
+- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)).
+
+```javascript
+import { createEvent } from 'react-tagged-state';
+
+const resetEvent = createEvent();
+
+resetEvent``((name) => {
+  console.log(name);
+});
+```
 
 ---
 
-### createEffect: (effect) => cleanup
+### createEffect: (effectFunction) => effect
 
 ```javascript
-// start effect
-const cleanup = createEffect(() => {
-    console.log(counterState());
+const logCounterEffect = createEffect(() => {
+  console.log(counterState());
 });
-
-// clear effect
-cleanup();
 ```
 
 Params:
 
--   `effect: () => any`
+- `effectFunction: () => any`
 
-Returns `function` that clear effect
+Returns:
 
-`effect` would be called immediately and anytime when state parts that `effect` reads changed
+- `effect: Effect<any>`
+
+### effect
+
+`effect` is a function that run effect.
+
+> Run effectFunction immediately and when states that effectFunction reads changed. 
+
+~~Params:~~
+
+Returns:
+
+- `cleanup: () => void`
+
+> Useful for `useEffect` when you don't want re-render Component.
 
 ```javascript
-createEffect(() => console.log(counterState()));
+import {
+  createState,
+  createEffect
+} from 'react-tagged-state';
+
+const counterState = createState(0);
+
+const logCounterEffect = createEffect(() => {
+  console.log(counterState());
+});
+
+const Example = () => {
+  const counter = useSelector(counterState);
+
+  // With effect
+  useEffect(logCounterEffect);
+
+  // With inline effect
+  useEffect(
+    createEffect(() => {
+      console.log(counterState());
+    })
+  );
+
+  return null;
+};
 ```
 
 ---
 
 ### useSelector: (selector) => value
 
-`useSelector` is a [React](https://reactjs.org/) binding
+It's hook for connecting with _React_.
 
--   Call `selector` anytime when state parts that `selector` reads changed or `selector` changed itself
--   Re-render component anytime when `value` that `selector` returns changed
+> Re-render Component when value that selector returns changed.
+
+```javascript
+const doubledCounter = useSelector(
+  () => counterState() * 2
+);
+```
 
 Params:
 
--   `selector: () => any`
+- `selector: () => any`
 
-Returns `value` that `selector` returns
+Returns:
+
+- `value: any`
 
 ```javascript
-import { createState, useSelector } from 'react-tagged-state';
+import {
+  createState,
+  useSelector
+} from 'react-tagged-state';
+
+const usersState = createState({
+  id1: { fullName: 'Adam Sandler' },
+  id2: { fullName: 'Oleg Grishechkin' }
+  //...
+});
+
+// Re-render UserCard when
+// usersState()[userId].fullName changed
+const UserCard = ({ userId }) => {
+  const fullName = useSelector(
+    () => usersState()[userId].fullName
+  );
+
+  return <div>{fullName}</div>;
+};
+```
+
+> 💡 Since selector is just a function without arguments, state can be a selector.
+
+```javascript
+import {
+  createState,
+  useSelector
+} from 'react-tagged-state';
 
 const counterState = createState(0);
 
 const Example = () => {
-    const doubledCounter = useSelector(() => counterState() * 2);
+  const counter = useSelector(counterState);
 
-    return (
-        <button
-            onClick={() => {
-                counterState((value) => value + 1);
-            }}
-        >
-            {doubledCounter}
-        </button>
-    );
+  return (
+    <button
+      onClick={() => {
+        counterState((value) => value + 1);
+      }}
+    >
+      {counter}
+    </button>
+  );
 };
 ```
 
-Since `selector` is just a function without arguments, [`state`](#state) can be a `selector`
+### observer: (Component) => EnhanceComponent
+
+It's HOC for connecting with _React_.
+
+> Re-render Component when states that Component reads changed.
 
 ```javascript
-import { createState, useSelector } from 'react-tagged-state';
+import {
+  createState,
+  observer
+} from 'react-tagged-state';
 
 const counterState = createState(0);
 
-const Example = () => {
-    const counter = useSelector(counterState);
-
-    return (
-        <button
-            onClick={() => {
-                counterState((value) => value + 1);
-            }}
-        >
-            {counter}
-        </button>
-    );
-};
+// Re-render Example when counterState changed
+const Example = observer(() => (
+  <button
+    onClick={() => {
+      counterState((value) => value + 1);
+    }}
+  >
+    {counterState()}
+  </button>
+));
 ```
 
----
+### compute: (selector) => value
+
+It's inline computed value.
+
+> Useful for `observer` and `createEffect` - reaction will be triggered only if value that selector returns changed.
+
+> 💡 You can use it into `useSelector` - it will work just simple selector.
+
+```javascript
+import {
+  createState,
+  observer,
+  compute
+} from 'react-tagged-state';
+
+const usersState = createState({
+  id1: { fullName: 'Adam Sandler' },
+  id2: { fullName: 'Oleg Grishechkin' }
+  //...
+});
+
+// Re-render UserCard when 
+// usersState()[userId].fullName changed
+const UserCard = observer(({ userId }) => (
+  <div>
+    {compute(() => usersState()[userId].fullName)}
+  </div>
+));
+```
 
 ## Performance
 
-See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html)
+See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html).
 
 ## Browsers support
 
 Browser should support [spread](https://caniuse.com/mdn-javascript_operators_spread_spread_in_object_literals):
 
--   Chrome: >= 60
--   Firefox: >= 55
--   Safari: >= 11.1
+- Chrome: >= 60
+- Firefox: >= 55
+- Safari: >= 11.1
