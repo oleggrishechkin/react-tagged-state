@@ -9,7 +9,7 @@
 
 ⚛️ Reactive state manager
 
-Easy-to-use super light-weight global state management solution for _React_
+Experimental easy-to-use super-light-weight global state management solution for _React_
 
 - Fast 🚀
 - Reactive ⚛️
@@ -20,7 +20,7 @@ Easy-to-use super light-weight global state management solution for _React_
 ```javascript
 import {
   createState,
-  useSelector,
+  useObserver,
   observer
 } from 'react-tagged-state';
 
@@ -28,7 +28,7 @@ const counterState = createState(0);
 
 // with hooks
 const Example = () => {
-  const counter = useSelector(counterState);
+  const counter = useObserver(counterState);
 
   return (
     <button
@@ -88,8 +88,6 @@ Returns:
 
 ### state
 
-it's [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates).
-
 You can use it for:
 
 - "get" value (call without arguments).
@@ -123,7 +121,7 @@ import { counterState } from 'react-tagged-state';
 
 const counterState = createState(0);
 
-counterState``((counter) => {
+counterState.on((counter) => {
   console.log(counter);
 });
 ```
@@ -144,8 +142,6 @@ Returns:
 
 ### event
 
-It's [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates).
-
 You can use it for:
 
 - "dispatch" payload.
@@ -165,64 +161,44 @@ import { createEvent } from 'react-tagged-state';
 
 const resetEvent = createEvent();
 
-resetEvent``((name) => {
+resetEvent.on((name) => {
   console.log(name);
 });
 ```
 
 ---
 
-### createEffect: (effectFunction) => effect
+### effect: (callback) => cleanup
+
+> Re-run callback when states that callback reads directly or computed value changed.
 
 ```javascript
-const logCounterEffect = createEffect(() => {
+const cleanup = effect(() => {
   console.log(counterState());
 });
 ```
 
 Params:
 
-- `effectFunction: () => any`
-
-Returns:
-
-- `effect: Effect<any>`
-
-### effect
-
-`effect` is a function that run effect.
-
-> Run effectFunction immediately and when states that effectFunction reads changed. 
-
-~~Params:~~
+- `callback: () => any`
 
 Returns:
 
 - `cleanup: () => void`
 
-> Useful for `useEffect` when you don't want re-render Component.
-
 ```javascript
 import {
   createState,
-  createEffect
+  effect
 } from 'react-tagged-state';
 
 const counterState = createState(0);
 
-const logCounterEffect = createEffect(() => {
-  console.log(counterState());
-});
-
 const Example = () => {
   const counter = useSelector(counterState);
 
-  // With effect
-  useEffect(logCounterEffect);
-
-  // With inline effect
-  useEffect(
-    createEffect(() => {
+  useEffect(() =>
+    effect(() => {
       console.log(counterState());
     })
   );
@@ -233,16 +209,14 @@ const Example = () => {
 
 ---
 
-### useSelector: (selector) => value
+### useObserver: (selector | state) => value
 
 It's hook for connecting with _React_.
 
-> Re-render Component when value that selector returns changed.
+> Re-render Component when state, states that selector reads directly or computed value changed.
 
 ```javascript
-const doubledCounter = useSelector(
-  () => counterState() * 2
-);
+const counter = useObserver(counterState);
 ```
 
 Params:
@@ -259,35 +233,10 @@ import {
   useSelector
 } from 'react-tagged-state';
 
-const usersState = createState({
-  id1: { fullName: 'Adam Sandler' },
-  id2: { fullName: 'Oleg Grishechkin' }
-  //...
-});
-
-// Re-render UserCard when
-// usersState()[userId].fullName changed
-const UserCard = ({ userId }) => {
-  const fullName = useSelector(
-    () => usersState()[userId].fullName
-  );
-
-  return <div>{fullName}</div>;
-};
-```
-
-> 💡 Since selector is just a function without arguments, state can be a selector.
-
-```javascript
-import {
-  createState,
-  useSelector
-} from 'react-tagged-state';
-
 const counterState = createState(0);
 
 const Example = () => {
-  const counter = useSelector(counterState);
+  const counter = useObserver(counterState);
 
   return (
     <button
@@ -301,11 +250,36 @@ const Example = () => {
 };
 ```
 
+> 💡 You can use `compute` to optimize selector
+
+```javascript
+import {
+  createState,
+  useObserver
+} from 'react-tagged-state';
+
+const usersState = createState({
+  id1: { fullName: 'Adam Sandler' },
+  id2: { fullName: 'Oleg Grishechkin' }
+  //...
+});
+
+// Re-render UserCard when
+// usersState()[userId].fullName changed
+const UserCard = ({ userId }) => {
+  const fullName = useObserver(
+    () => compute(() => usersState()[userId].fullName)
+  );
+
+  return <div>{fullName}</div>;
+};
+```
+
 ### observer: (Component) => EnhanceComponent
 
 It's HOC for connecting with _React_.
 
-> Re-render Component when states that Component reads changed.
+> Re-render Component when states that Component reads directly or computed value changed.
 
 ```javascript
 import {
@@ -331,9 +305,7 @@ const Example = observer(() => (
 
 It's inline computed value.
 
-> Useful for `observer` and `createEffect` - reaction will be triggered only if value that selector returns changed.
-
-> 💡 You can use it into `useSelector` - it will work just simple selector.
+> Useful for `observer` and `effect` and `useObserver` - reaction will be triggered only if value that selector returns changed.
 
 ```javascript
 import {
