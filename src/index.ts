@@ -1,30 +1,23 @@
 import { ForwardRefRenderFunction, FunctionComponent, useEffect, useState } from 'react';
 
-type Deps = Record<number, Array<() => boolean> | true>;
+const listeners: Map<
+    () => any,
+    {
+        current: Record<number, Array<() => boolean> | true>;
+    }
+> = new Map();
 
-interface DepsRef {
-    current: Deps;
-}
-
-const listeners: Map<() => any, DepsRef> = new Map();
-
-const listen = (callback: () => any, depsRef: DepsRef): (() => void) => {
+const listen = (
+    callback: () => any,
+    depsRef: {
+        current: Record<number, Array<() => boolean> | true>;
+    }
+): (() => void) => {
     listeners.set(callback, depsRef);
 
     return () => {
         listeners.delete(callback);
     };
-};
-
-const notify = (key: number): void => {
-    listeners.forEach((depsRef, callback) => {
-        if (
-            key in depsRef.current &&
-            (depsRef.current[key] === true || (depsRef.current[key] as Array<() => boolean>).find((check) => check()))
-        ) {
-            callback();
-        }
-    });
 };
 
 export interface State<Type> {
@@ -35,14 +28,14 @@ export interface State<Type> {
 
 let uniqueNumber = 0;
 
-let globalDeps: Deps;
+let globalDeps: Record<number, Array<() => boolean> | true>;
 
 let globalCheck: (() => boolean) | null = null;
 
 export const createState = <Type>(initialValue: (() => Type) | Type): State<Type> => {
     const key = ++uniqueNumber;
     let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
-    const signal = (...args: any[]): any => {
+    const state = (...args: any[]): any => {
         if (!args.length) {
             if (globalDeps && globalDeps[key] !== true) {
                 if (globalCheck) {
@@ -63,11 +56,19 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
 
         if (nextValue !== value) {
             value = nextValue;
-            notify(key);
+            listeners.forEach((depsRef, callback) => {
+                if (
+                    key in depsRef.current &&
+                    (depsRef.current[key] === true ||
+                        (depsRef.current[key] as Array<() => boolean>).find((check) => check()))
+                ) {
+                    callback();
+                }
+            });
         }
     };
 
-    signal.on = (callback: (value: Type) => any) =>
+    state.on = (callback: (value: Type) => any) =>
         listen(
             () => {
                 callback(value);
@@ -79,7 +80,7 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
             }
         );
 
-    return signal;
+    return state;
 };
 
 export interface Event<Type> {
@@ -104,7 +105,7 @@ export const createEvent = <Type = void>(): Event<Type> => {
     return event;
 };
 
-const track = <Type>(func: (() => Type) | State<Type>, deps: Deps) => {
+const track = <Type>(func: (() => Type) | State<Type>, deps: Record<number, Array<() => boolean> | true>) => {
     const tmp = globalDeps;
 
     globalDeps = deps;
@@ -116,7 +117,7 @@ const track = <Type>(func: (() => Type) | State<Type>, deps: Deps) => {
     return result;
 };
 
-export const compute = <Type>(func: (() => Type) | State<Type>) => {
+export const compute = <Type>(func: () => Type) => {
     // eslint-disable-next-line prefer-const
     let result: Type;
 
@@ -138,25 +139,32 @@ export const effect = (callback: () => any) => {
     }, depsRef);
 };
 
-export const useObserver = <Type>(func: (() => Type) | State<Type>) => {
-    const [{ depsRef }, forceUpdate] = useState({ depsRef: { current: {} } });
+export const useObserver = () => {
+    const [{ depsRef, get }, forceUpdate] = useState(() => {
+        const depsRef = { current: {} };
+        const get = <Type>(func: (() => Type) | State<Type>) => track(func, depsRef.current);
+
+        return { depsRef, get };
+    });
+
+    depsRef.current = {};
 
     useEffect(
         () =>
             listen(() => {
-                forceUpdate({ depsRef });
+                forceUpdate({ depsRef, get });
             }, depsRef),
         // eslint-disable-next-line react-hooks/exhaustive-deps
         []
     );
 
-    return track(func, (depsRef.current = {}));
+    return get;
 };
 
 export const observer = <Type extends FunctionComponent<any> | ForwardRefRenderFunction<any, any>>(
     wrappedComponent: Type
 ) => {
-    const EnhanceComponent = (props: any, ref: any) => useObserver(() => wrappedComponent(props, ref));
+    const EnhanceComponent = (props: any, ref: any) => useObserver()(() => wrappedComponent(props, ref));
 
     EnhanceComponent.displayName = `observer(${wrappedComponent.displayName || wrappedComponent.name || 'Component'})`;
 

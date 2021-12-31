@@ -9,40 +9,19 @@
 
 ⚛️ Reactive state manager
 
-Experimental easy-to-use super-light-weight global state management solution for _React_
+Experimental reactive and atomic state manager for _React_
 
-- Fast 🚀
-- Reactive ⚛️
-- Atomic 🧬
-
-## Usage
+## Basic Usage
 
 ```javascript
 import {
   createState,
-  useObserver,
   observer
 } from 'react-tagged-state';
 
 const counterState = createState(0);
 
-// with hooks
-const Example = () => {
-  const counter = useObserver(counterState);
-
-  return (
-    <button
-      onClick={() => {
-        counterState((value) => value + 1);
-      }}
-    >
-      {counter}
-    </button>
-  );
-};
-
-// with HOC
-const Example = observer(() => (
+const Counter = observer(() => (
   <button
     onClick={() => {
       counterState((value) => value + 1);
@@ -53,12 +32,13 @@ const Example = observer(() => (
 ));
 ```
 
-That's it. You already know how use it 💪
+## Principles
 
-## Main concept
-
-- Based on [signals](https://github.com/adamhaile/S#data-signals) inspired by _solid-js_ and _S.js_, so you only need one function for a state value "get" or "set".
-- Connects with _React_ by `useSelector` (like _react-redux_) hook and `observer` HOC (like _mobx-react_). You can use both in the same time.
+1. Create your states with `createState`.
+2. Read state value by calling state without arguments `state()` anywhere.
+3. Write state value by calling state with value argument `state(value)` anywhere.
+4. Bind your components with `observer` HOC or `useObserver` hook.
+5. Use inline selectors by `compute`.
 
 ## Installation
 
@@ -66,125 +46,150 @@ That's it. You already know how use it 💪
 npm install --save react-tagged-state
 ```
 
-## API
+## API Reference
 
-### createState: (initialState) => state
+- [createState](#createstate)
+- [createEvent](#createevent)
+- [effect](#effect)
+- [observer](#observer)
+- [useObserver](#useobserver)
+- [compute](#compute)
+
+### createState
+
+```typescript
+interface CreateState<Type> {
+  (
+    initialValue: (() => Type) | Type
+  ): State<Type>;
+}
+```
+
+This is a [state](#state) fabric.
 
 ```javascript
-// With value
+import { createState } from 'react-tagged-state';
+
+// Initialize with value
 const counterState = createState(0);
 
-// With function
+// Initialize with function
 const anotherCounterState = createState(() => 0);
 ```
 
-Params:
-
-- `initialState: () => any | any`
-
-Returns:
-
-- `state: State<any>`
+---
 
 ### state
 
-You can use it for:
-
-- "get" value (call without arguments).
-
-```javascript
-import { counterState } from 'react-tagged-state';
-
-const counterState = createState(0);
-
-const counter = counterState();
+```typescript
+interface State<Type> {
+  (): Type;
+  (updater: ((value: Type) => Type) | Type): void;
+  on: (
+    callback: (value: Type) => any
+  ) => () => void;
+}
 ```
 
-- "set" value (call with `updaters` arguments).
+This is a base part of state system.
+You can use it for read value, write value or subscribe to value.
 
 ```javascript
 import { counterState } from 'react-tagged-state';
 
 const counterState = createState(0);
 
-// With value
+// Read
+const counter = counterState();
+
+// Write with value
 counterState(1000);
 
-// With function
+// Write with function
 counterState((counter) => counter + 1);
-```
 
-- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)).
-
-```javascript
-import { counterState } from 'react-tagged-state';
-
-const counterState = createState(0);
-
-counterState.on((counter) => {
+// Subscribe to value
+const cleanup = counterState.on((counter) => {
   console.log(counter);
 });
+
+// Clear subscription
+cleanup();
 ```
 
 ---
 
-### createEvent: () => event
+### createEvent
 
 ```typescript
+interface CreateEvent<Type = void> {
+  (): Event<Type>;
+}
+```
+
+This is a [event](#event) fabric.
+
+```javascript
+import { createEvent } from 'react-tagged-state';
+
 const resetEvent = createEvent();
 ```
 
-~~Params:~~
-
-Returns:
-
-- `event: Event<any>`
+---
 
 ### event
 
-You can use it for:
-
-- "dispatch" payload.
-
-```javascript
-import { createEvent } from 'react-tagged-state';
-
-const resetEvent = createEvent();
-
-resetEvent('counter');
+```typescript
+interface Event<Type> {
+  (payload: Type): void;
+  on: (
+    callback: (payload: Type) => any
+  ) => () => void;
+}
 ```
 
-- "subscribe" (call via [tagged template](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Template_literals#tagged_templates)).
+This is a base part of event system.
+You can use it for dispatch event or subscribe to event.
+
+> 💡 Useful for changing multiple states by one event
 
 ```javascript
-import { createEvent } from 'react-tagged-state';
+import {
+  counterState,
+  createEvent
+} from 'react-tagged-state';
 
+const counterState = createState(0);
 const resetEvent = createEvent();
 
-resetEvent.on((name) => {
-  console.log(name);
+// Dispatch payload
+resetEvent('counter');
+
+// Subscribe to event dispatches
+const cleanup = resetEvent.on((name) => {
+  if (name === 'counter') {
+    counterState(0);
+  }
 });
+
+// Clear subscription
+cleanup();
 ```
 
 ---
 
-### effect: (callback) => cleanup
+### effect
 
-> Re-run callback when states that callback reads directly or computed value changed.
-
-```javascript
-const cleanup = effect(() => {
-  console.log(counterState());
-});
+```typescript
+interface Effect {
+  (callback: () => any): () => void;
+}
 ```
 
-Params:
+This is a reaction.
+It will call callback immediately and anytime when states thus callback reads was updated.
 
-- `callback: () => any`
-
-Returns:
-
-- `cleanup: () => void`
+> 💡 Useful in `useEffect` or non-React code
 
 ```javascript
 import {
@@ -194,92 +199,31 @@ import {
 
 const counterState = createState(0);
 
-const Example = () => {
-  const counter = useSelector(counterState);
+// Run effect and subscribe to state changes
+const cleanup = effect(() => {
+  console.log(counterState());
+});
 
-  useEffect(() =>
-    effect(() => {
-      console.log(counterState());
-    })
-  );
-
-  return null;
-};
+// Clear subscription
+cleanup();
 ```
 
 ---
 
-### useObserver: (selector | state) => value
+### observer
 
-It's hook for connecting with _React_.
-
-> Re-render Component when state, states that selector reads directly or computed value changed.
-
-```javascript
-const counter = useObserver(counterState);
+```typescript
+interface Observer<
+  Type extends
+    | FunctionComponent<any>
+    | ForwardRefRenderFunction<any, any>
+> {
+  (wrappedComponent: Type): Type;
+}
 ```
 
-Params:
-
-- `selector: () => any`
-
-Returns:
-
-- `value: any`
-
-```javascript
-import {
-  createState,
-  useSelector
-} from 'react-tagged-state';
-
-const counterState = createState(0);
-
-const Example = () => {
-  const counter = useObserver(counterState);
-
-  return (
-    <button
-      onClick={() => {
-        counterState((value) => value + 1);
-      }}
-    >
-      {counter}
-    </button>
-  );
-};
-```
-
-> 💡 You can use `compute` to optimize selector
-
-```javascript
-import {
-  createState,
-  useObserver
-} from 'react-tagged-state';
-
-const usersState = createState({
-  id1: { fullName: 'Adam Sandler' },
-  id2: { fullName: 'Oleg Grishechkin' }
-  //...
-});
-
-// Re-render UserCard when
-// usersState()[userId].fullName changed
-const UserCard = ({ userId }) => {
-  const fullName = useObserver(
-    () => compute(() => usersState()[userId].fullName)
-  );
-
-  return <div>{fullName}</div>;
-};
-```
-
-### observer: (Component) => EnhanceComponent
-
-It's HOC for connecting with _React_.
-
-> Re-render Component when states that Component reads directly or computed value changed.
+This is a React binding (and reaction).
+This HOC will re-render Component anytime when states thus Component reads was updated.
 
 ```javascript
 import {
@@ -289,8 +233,8 @@ import {
 
 const counterState = createState(0);
 
-// Re-render Example when counterState changed
-const Example = observer(() => (
+// Re-render Counter if counterState was changed
+const Counter = observer(() => (
   <button
     onClick={() => {
       counterState((value) => value + 1);
@@ -301,11 +245,64 @@ const Example = observer(() => (
 ));
 ```
 
-### compute: (selector) => value
+---
 
-It's inline computed value.
+### useObserver
 
-> Useful for `observer` and `effect` and `useObserver` - reaction will be triggered only if value that selector returns changed.
+```typescript
+interface UseObserver {
+  (): <Type>(
+    func: (() => Type) | State<Type>
+  ) => Type;
+}
+```
+
+This is a React binding (and reaction).
+It returns a "track" function.
+This hook will re-render Component anytime when states thus returned a "track" function reads was updated.
+
+> 💡 Useful in custom hooks (or if you don't like HOCs)
+
+```javascript
+import {
+  createState,
+  observer
+} from 'react-tagged-state';
+
+const counterState = createState(0);
+
+// Re-render Counter if counterState was changed
+const Counter = () => {
+  const get = useObserver();
+
+  return (
+    <button
+      onClick={() => {
+        counterState((value) => value + 1);
+      }}
+    >
+      {get(counterState)}
+    </button>
+  );
+};
+```
+
+---
+
+### compute
+
+```typescript
+interface Compute<Type> {
+  (func: () => Type): Type;
+}
+```
+
+This is an inline selector.
+It can optimize you reactions.
+This function receive a "selector" function.
+Reactions will be triggered if value that "selector" function returns was changed.
+
+> 💡 Sometimes you need to select specific item or some nested data
 
 ```javascript
 import {
@@ -320,8 +317,7 @@ const usersState = createState({
   //...
 });
 
-// Re-render UserCard when 
-// usersState()[userId].fullName changed
+// Re-render UserCard if usersState()[userId].fullName was changed
 const UserCard = observer(({ userId }) => (
   <div>
     {compute(() => usersState()[userId].fullName)}
@@ -332,11 +328,3 @@ const UserCard = observer(({ userId }) => (
 ## Performance
 
 See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html).
-
-## Browsers support
-
-Browser should support [spread](https://caniuse.com/mdn-javascript_operators_spread_spread_in_object_literals):
-
-- Chrome: >= 60
-- Firefox: >= 55
-- Safari: >= 11.1
