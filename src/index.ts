@@ -60,7 +60,7 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
                 if (
                     key in depsRef.current &&
                     (depsRef.current[key] === true ||
-                        (depsRef.current[key] as Array<() => boolean>).find((check) => check()))
+                        (depsRef.current[key] as Array<() => boolean>).some((check) => check()))
                 ) {
                     callback();
                 }
@@ -123,7 +123,6 @@ export const compute = <Type>(func: () => Type) => {
 
     globalCheck = () => func() !== result;
     result = func();
-
     globalCheck = null;
 
     return result;
@@ -132,7 +131,7 @@ export const compute = <Type>(func: () => Type) => {
 export const effect = (callback: () => any) => {
     const depsRef = { current: {} };
 
-    track(callback, depsRef);
+    track(callback, depsRef.current);
 
     return listen(() => {
         track(callback, (depsRef.current = {}));
