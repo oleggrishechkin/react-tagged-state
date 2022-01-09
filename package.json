@@ -1,7 +1,7 @@
 {
     "name": "react-tagged-state",
-    "version": "1.0.12",
-    "description": "⚛️ Reactive state manager",
+    "version": "1.0.13",
+    "description": "⚛️ Experimental reactive and atomic state manager for React",
     "keywords": [
         "react",
         "tagged",

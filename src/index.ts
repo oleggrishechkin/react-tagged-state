@@ -1,52 +1,27 @@
-import { ForwardRefRenderFunction, FunctionComponent, useEffect, useState } from 'react';
+import { ForwardRefRenderFunction, FunctionComponent, useEffect, useReducer } from 'react';
 
-const listeners: Map<
-    () => any,
-    {
-        current: Record<number, Array<() => boolean> | true>;
-    }
-> = new Map();
+let currentSubscriber: Subscriber | null = null;
 
-const listen = (
-    callback: () => any,
-    depsRef: {
-        current: Record<number, Array<() => boolean> | true>;
-    }
-): (() => void) => {
-    listeners.set(callback, depsRef);
-
-    return () => {
-        listeners.delete(callback);
-    };
-};
+export interface Subscriber {
+    callback: () => any;
+    cleanups: Set<(subscriber: Subscriber) => any>;
+}
 
 export interface State<Type> {
     (): Type;
     (updater: ((value: Type) => Type) | Type): void;
-    on: (callback: (value: Type) => any) => () => void;
 }
 
-let uniqueNumber = 0;
-
-let globalDeps: Record<number, Array<() => boolean> | true>;
-
-let globalCheck: (() => boolean) | null = null;
-
-export const createState = <Type>(initialValue: (() => Type) | Type): State<Type> => {
-    const key = ++uniqueNumber;
+export const createState = <Type>(initialValue?: (() => Type) | Type): State<Type> => {
     let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
-    const state = (...args: any[]): any => {
+    const subscribers = new Set<Subscriber>();
+    const cleanup = (subscriber: Subscriber) => subscribers.delete(subscriber);
+
+    return (...args: any[]): any => {
         if (!args.length) {
-            if (globalDeps && globalDeps[key] !== true) {
-                if (globalCheck) {
-                    if (key in globalDeps) {
-                        (globalDeps[key] as Array<() => boolean>).push(globalCheck);
-                    } else {
-                        globalDeps[key] = [globalCheck];
-                    }
-                } else {
-                    globalDeps[key] = true;
-                }
+            if (currentSubscriber) {
+                subscribers.add(currentSubscriber);
+                currentSubscriber.cleanups.add(cleanup);
             }
 
             return value;
@@ -56,116 +31,121 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
 
         if (nextValue !== value) {
             value = nextValue;
-            listeners.forEach((depsRef, callback) => {
-                if (
-                    key in depsRef.current &&
-                    (depsRef.current[key] === true ||
-                        (depsRef.current[key] as Array<() => boolean>).some((check) => check()))
-                ) {
-                    callback();
-                }
-            });
+            subscribers.forEach((subscriber) => subscriber.callback());
         }
     };
-
-    state.on = (callback: (value: Type) => any) =>
-        listen(
-            () => {
-                callback(value);
-            },
-            {
-                current: {
-                    [key]: true
-                }
-            }
-        );
-
-    return state;
 };
 
 export interface Event<Type> {
-    (payload: Type): void;
-    on: (callback: (payload: Type) => any) => () => void;
+    (value: Type): void;
+    readonly _subscribe: (callback: (value: Type) => any) => () => void;
 }
 
 export const createEvent = <Type = void>(): Event<Type> => {
-    const subscribers: Set<(payload: Type) => any> = new Set();
-    const event = (payload: Type): void => {
-        subscribers.forEach((callback) => callback(payload));
-    };
+    const subscribers = new Set<(value: Type) => any>();
 
-    event.on = (callback: (payload: Type) => any) => {
-        subscribers.add(callback);
+    return Object.assign((value: Type) => subscribers.forEach((callback) => callback(value)), {
+        _subscribe: (callback: (value: Type) => any) => {
+            subscribers.add(callback);
 
-        return () => {
-            subscribers.delete(callback);
-        };
-    };
-
-    return event;
+            return () => {
+                subscribers.delete(callback);
+            };
+        }
+    });
 };
 
-const track = <Type>(func: (() => Type) | State<Type>, deps: Record<number, Array<() => boolean> | true>) => {
-    const tmp = globalDeps;
+export const track = <Type>(func: (() => Type) | State<Type>, subscriber: Subscriber) => {
+    const tmp = currentSubscriber;
 
-    globalDeps = deps;
+    currentSubscriber = subscriber;
 
     const result = func();
 
-    globalDeps = tmp;
+    currentSubscriber = tmp;
 
     return result;
 };
 
-export const compute = <Type>(func: () => Type) => {
-    // eslint-disable-next-line prefer-const
-    let result: Type;
+export const compute = <Type>(func: (() => Type) | State<Type>) => {
+    if (!currentSubscriber) {
+        return func();
+    }
 
-    globalCheck = () => func() !== result;
-    result = func();
-    globalCheck = null;
+    const subscriber: Subscriber = { callback: () => {}, cleanups: new Set() };
+    const tmp = currentSubscriber;
 
-    return result;
-};
+    currentSubscriber = subscriber;
 
-export const effect = (callback: () => any) => {
-    const depsRef = { current: {} };
+    const value = func();
 
-    track(callback, depsRef.current);
-
-    return listen(() => {
-        track(callback, (depsRef.current = {}));
-    }, depsRef);
-};
-
-export const useObserver = () => {
-    const [{ depsRef, get }, forceUpdate] = useState(() => {
-        const depsRef = { current: {} };
-        const get = <Type>(func: (() => Type) | State<Type>) => track(func, depsRef.current);
-
-        return { depsRef, get };
+    currentSubscriber = tmp;
+    tmp.cleanups.add(() => {
+        subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+        subscriber.cleanups.clear();
     });
+    subscriber.callback = () => value !== func() && tmp.callback();
 
-    depsRef.current = {};
+    return value;
+};
 
-    useEffect(
-        () =>
-            listen(() => {
-                forceUpdate({ depsRef, get });
-            }, depsRef),
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-        []
-    );
+export interface Effect {
+    (callback: () => void | (() => void)): () => void;
+    <Type>(func: (() => Type) | State<Type> | Event<Type>, callback: (value: Type) => void | (() => void)): () => void;
+}
 
-    return get;
+export const effect: Effect = (...args: any[]): (() => void) => {
+    if (args.length > 1 && '_subscribe' in args[0]) {
+        return args[0]._subscribe(args[1]);
+    }
+
+    const subscriber: Subscriber = { callback: () => {}, cleanups: new Set() };
+
+    subscriber.callback = () => {
+        subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+        subscriber.cleanups.clear();
+
+        const cleanup = args.length > 1 ? args[1](track(args[0], subscriber)) : track(args[0], subscriber);
+
+        if (typeof cleanup === 'function') {
+            subscriber.cleanups.add(() => cleanup());
+        }
+    };
+
+    if (args.length > 1) {
+        track(args[0], subscriber);
+    } else {
+        subscriber.callback();
+    }
+
+    return () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+};
+
+const init = () => ({ subscriber: { callback: () => {}, cleanups: new Set<(subscriber: Subscriber) => any>() } });
+
+const reducer = ({ subscriber }: { subscriber: Subscriber }) => ({ subscriber });
+
+export const useObserver = <Type>(func: (() => Type) | State<Type>) => {
+    const [{ subscriber }, callback] = useReducer(reducer, null, init);
+
+    subscriber.callback = () => {
+        subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+        subscriber.cleanups.clear();
+        callback();
+    };
+
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)), []);
+
+    return track(func, subscriber);
 };
 
 export const observer = <Type extends FunctionComponent<any> | ForwardRefRenderFunction<any, any>>(
     wrappedComponent: Type
 ) => {
-    const EnhanceComponent = (props: any, ref: any) => useObserver()(() => wrappedComponent(props, ref));
+    const ObserverComponent = (props: any, ref: any) => useObserver(() => wrappedComponent(props, ref));
 
-    EnhanceComponent.displayName = `observer(${wrappedComponent.displayName || wrappedComponent.name || 'Component'})`;
+    ObserverComponent.displayName = `observer(${wrappedComponent.displayName || wrappedComponent.name || 'Component'})`;
 
-    return EnhanceComponent as Type;
+    return ObserverComponent as Type;
 };

@@ -7,9 +7,7 @@
 [![NPM total downloads](https://img.shields.io/npm/dt/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-viewport-list?minimal=true)
 [![NPM monthly downloads](https://img.shields.io/npm/dm/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-viewport-list?minimal=true)
 
-⚛️ Reactive state manager
-
-Experimental reactive and atomic state manager for _React_
+⚛️ Experimental reactive and atomic state manager for React
 
 ## Basic Usage
 
@@ -35,10 +33,10 @@ const Counter = observer(() => (
 ## Principles
 
 1. Create your states with `createState`.
-2. Read state value by calling state without arguments `state()` anywhere.
-3. Write state value by calling state with value argument `state(value)` anywhere.
+2. Read state by calling state without arguments `state()` anywhere.
+3. Write state by calling state with updater argument `state(value)` anywhere.
 4. Bind your components with `observer` HOC or `useObserver` hook.
-5. Use inline selectors by `compute`.
+5. Use inline computed by `compute`.
 
 ## Installation
 
@@ -50,16 +48,16 @@ npm install --save react-tagged-state
 
 - [createState](#createstate)
 - [createEvent](#createevent)
-- [effect](#effect)
 - [observer](#observer)
 - [useObserver](#useobserver)
+- [effect](#effect)
 - [compute](#compute)
 
 ### createState
 
 ```typescript
-interface CreateState<Type> {
-  (
+interface createState {
+  <Type>(
     initialValue: (() => Type) | Type
   ): State<Type>;
 }
@@ -85,14 +83,12 @@ const anotherCounterState = createState(() => 0);
 interface State<Type> {
   (): Type;
   (updater: ((value: Type) => Type) | Type): void;
-  on: (
-    callback: (value: Type) => any
-  ) => () => void;
 }
 ```
 
-This is a base part of state system.
-You can use it for read value, write value or subscribe to value.
+This is a base part of the state system.
+
+You can use it for read and write state.
 
 ```javascript
 import { counterState } from 'react-tagged-state';
@@ -107,14 +103,6 @@ counterState(1000);
 
 // Write with function
 counterState((counter) => counter + 1);
-
-// Subscribe to value
-const cleanup = counterState.on((counter) => {
-  console.log(counter);
-});
-
-// Clear subscription
-cleanup();
 ```
 
 ---
@@ -122,8 +110,8 @@ cleanup();
 ### createEvent
 
 ```typescript
-interface CreateEvent<Type = void> {
-  (): Event<Type>;
+interface createEvent {
+  <Type = void>(): Event<Type>;
 }
 ```
 
@@ -142,70 +130,20 @@ const resetEvent = createEvent();
 ```typescript
 interface Event<Type> {
   (payload: Type): void;
-  on: (
-    callback: (payload: Type) => any
-  ) => () => void;
 }
 ```
 
-This is a base part of event system.
-You can use it for dispatch event or subscribe to event.
+This is a base part of the event system.
 
-> 💡 Useful for changing multiple states by one event
+You can use it for dispatch event.
 
 ```javascript
-import {
-  counterState,
-  createEvent
-} from 'react-tagged-state';
+import { createEvent } from 'react-tagged-state';
 
-const counterState = createState(0);
 const resetEvent = createEvent();
 
-// Dispatch payload
-resetEvent('counter');
-
-// Subscribe to event dispatches
-const cleanup = resetEvent.on((name) => {
-  if (name === 'counter') {
-    counterState(0);
-  }
-});
-
-// Clear subscription
-cleanup();
-```
-
----
-
-### effect
-
-```typescript
-interface Effect {
-  (callback: () => any): () => void;
-}
-```
-
-This is a reaction.
-It will call callback immediately and anytime when states thus callback reads was updated.
-
-> 💡 Useful in `useEffect` or non-React code
-
-```javascript
-import {
-  createState,
-  effect
-} from 'react-tagged-state';
-
-const counterState = createState(0);
-
-// Run effect and subscribe to state changes
-const cleanup = effect(() => {
-  console.log(counterState());
-});
-
-// Clear subscription
-cleanup();
+// Dispatch
+resetEvent();
 ```
 
 ---
@@ -213,17 +151,22 @@ cleanup();
 ### observer
 
 ```typescript
-interface Observer<
-  Type extends
-    | FunctionComponent<any>
-    | ForwardRefRenderFunction<any, any>
-> {
-  (wrappedComponent: Type): Type;
+interface observer {
+  <
+    Type extends
+      | FunctionComponent<any>
+      | ForwardRefRenderFunction<any, any>
+  >(
+    wrappedComponent: Type
+  ): Type;
 }
 ```
 
 This is a React binding (and reaction).
-This HOC will re-render Component anytime when states thus Component reads was updated.
+
+This HOC will re-render component anytime when some states thus component reads were changed.
+
+It's like `observer` HOC from _mobx-react-lite_.
 
 ```javascript
 import {
@@ -250,18 +193,16 @@ const Counter = observer(() => (
 ### useObserver
 
 ```typescript
-interface UseObserver {
-  (): <Type>(
-    func: (() => Type) | State<Type>
-  ) => Type;
+interface useObserver {
+  <Type>(func: (() => Type) | State<Type>): Type;
 }
 ```
 
-This is a React binding (and reaction).
-It returns a "track" function.
-This hook will re-render Component anytime when states thus returned a "track" function reads was updated.
+This is a React binding too (and reaction).
 
-> 💡 Useful in custom hooks (or if you don't like HOCs)
+This hook will call `func` immediately and will call `func` and re-render component anytime when states thus `func` reads were changed.
+
+You should prefer [`observer`](#observer) for components but [`useObserver`](#useobserver) useful for custom hooks. Anyway you can use this hook for components if you don't like HOC's.
 
 ```javascript
 import {
@@ -271,9 +212,12 @@ import {
 
 const counterState = createState(0);
 
+const useCounter = () =>
+  useObserver(counterState);
+
 // Re-render Counter if counterState was changed
 const Counter = () => {
-  const get = useObserver();
+  const counter = useCounter();
 
   return (
     <button
@@ -281,7 +225,7 @@ const Counter = () => {
         counterState((value) => value + 1);
       }}
     >
-      {get(counterState)}
+      {counter}
     </button>
   );
 };
@@ -289,20 +233,74 @@ const Counter = () => {
 
 ---
 
-### compute
+### effect
 
 ```typescript
-interface Compute<Type> {
-  (func: () => Type): Type;
+export interface Effect {
+  (
+    callback: () => void | (() => void)
+  ): () => void;
+  <Type>(
+    func:
+      | (() => Type)
+      | State<Type>
+      | Event<Type>,
+    callback: (value: Type) => void | (() => void)
+  ): () => void;
 }
 ```
 
-This is an inline selector.
-It can optimize you reactions.
-This function receive a "selector" function.
-Reactions will be triggered if value that "selector" function returns was changed.
+This is a reaction.
 
-> 💡 Sometimes you need to select specific item or some nested data
+If [`effect`](#effect) called with one argument then it will call `callback` immediately and will re-call `callback` anytime when some states thus `callback` reads were changed.
+
+If [`effect`](#effect) called with two arguments then it will call `func` immediately and will re-call `func` and `callback` with `func` returned value anytime when some states thus `func` reads were changed.
+
+You can return cleanup function from `callback`: it will be called before next `callback` call. API similar to `useEffect` from _React_
+
+```javascript
+import {
+  createState,
+  effect
+} from 'react-tagged-state';
+
+const counterState = createState(0);
+
+// Run effect
+const cleanupEffect = effect(() => {
+  console.log(counterState());
+});
+
+// Clear effect
+cleanupEffect();
+
+// Run subscription
+const cleanupSubscription = effect(
+  counterState,
+  (counter) => {
+    console.log(counter);
+  }
+);
+
+// Clear subscription
+cleanupSubscription();
+```
+
+---
+
+### compute
+
+```typescript
+interface Compute {
+  <Type>(func: () => Type): Type;
+}
+```
+
+This is inline computed.
+
+It can optimize your reactions: reactions will be triggered if value that `func` returns was changed.
+
+Think about it like a `useSelector` hook from _react-redux_.
 
 ```javascript
 import {
@@ -312,8 +310,8 @@ import {
 } from 'react-tagged-state';
 
 const usersState = createState({
-  id1: { fullName: 'Adam Sandler' },
-  id2: { fullName: 'Oleg Grishechkin' }
+  id1: { id: 'id1', fullName: 'Adam Sandler' },
+  id2: { id: 'id2', fullName: 'Oleg Grishechkin' }
   //...
 });
 
