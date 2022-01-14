@@ -9,6 +9,8 @@
 
 ⚛️ Experimental reactive and atomic state manager for React
 
+Inspired by awesome [_solid-js_](https://www.solidjs.com/) and [_S.js_](https://github.com/adamhaile/S)
+
 ## Basic Usage
 
 ```javascript
@@ -162,7 +164,9 @@ interface observer {
 }
 ```
 
-This is a React binding (and reaction).
+This is a React binding.
+
+This is a reaction.
 
 This HOC will re-render component anytime when some states thus component reads were changed.
 
@@ -198,7 +202,9 @@ interface useObserver {
 }
 ```
 
-This is a React binding too (and reaction).
+This is a React binding.
+
+This is a reaction.
 
 This hook will call `func` immediately and will call `func` and re-render component anytime when states thus `func` reads were changed.
 
@@ -256,7 +262,11 @@ If [`effect`](#effect) called with one argument then it will call `callback` imm
 
 If [`effect`](#effect) called with two arguments then it will call `func` immediately and will re-call `func` and `callback` with `func` returned value anytime when some states thus `func` reads were changed.
 
-You can return cleanup function from `callback`: it will be called before next `callback` call. API similar to `useEffect` from _React_
+Deps will be tracked once, so you need to avoid reading states inside conditions. Rules for hooks in _React_ are allowed here.
+
+You can safety use `effect` inside other reactions.
+
+You can use `effect` with two arguments to subscribe to [`event`](#event), [`state`](#state) or [`compute`](#compute).
 
 ```javascript
 import {
@@ -298,9 +308,15 @@ interface Compute {
 
 This is inline computed.
 
+This is a reaction.
+
 It can optimize your reactions: reactions will be triggered if value that `func` returns was changed.
 
 Think about it like a `useSelector` hook from _react-redux_.
+
+Deps will be tracked once, so you need to avoid reading states inside conditions. Rules for hooks in _React_ are allowed here.
+
+You should use `compute` only inside reactions.
 
 ```javascript
 import {
