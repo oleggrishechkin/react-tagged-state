@@ -308,15 +308,13 @@ interface Compute {
 
 This is inline computed.
 
-This is a reaction.
+This is a reaction (only if you use it inside another reaction).
 
 It can optimize your reactions: reactions will be triggered if value that `func` returns was changed.
 
 Think about it like a `useSelector` hook from _react-redux_.
 
 Deps will be tracked once, so you need to avoid reading states inside conditions. Rules for hooks in _React_ are allowed here.
-
-You should use `compute` only inside reactions.
 
 ```javascript
 import {

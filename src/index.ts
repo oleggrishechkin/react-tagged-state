@@ -56,6 +56,10 @@ export const createEvent = <Type = void>(): Event<Type> => {
 };
 
 export const compute = <Type>(func: (() => Type) | State<Type>) => {
+    if (!currentSubscriber) {
+        return func();
+    }
+
     // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
     const tmp = currentSubscriber!;
     const subscriber: Subscriber = { callback: () => {}, cleanups: new Set() };
@@ -81,7 +85,7 @@ export const effect: Effect = (
     callback: (...args: any[]) => any = () => {}
 ): (() => void) => {
     if ('_subscribe' in func) {
-        return (func as Event<any>)._subscribe(func);
+        return (func as Event<any>)._subscribe(callback);
     }
 
     const tmp = currentSubscriber;
