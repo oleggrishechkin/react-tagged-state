@@ -243,15 +243,13 @@ const Counter = () => {
 
 ```typescript
 export interface Effect {
-  (
-    callback: () => void | (() => void)
-  ): () => void;
+  (callback: () => void): () => void;
   <Type>(
     func:
       | (() => Type)
       | State<Type>
       | Event<Type>,
-    callback: (value: Type) => void | (() => void)
+    callback: (value: Type) => void
   ): () => void;
 }
 ```

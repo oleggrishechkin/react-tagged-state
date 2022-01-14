@@ -12,16 +12,18 @@ export interface State<Type> {
     (updater: Type | ((value: Type) => Type)): void;
 }
 
+const noop = () => {};
+
 export const createState = <Type>(initialValue: (() => Type) | Type): State<Type> => {
     let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
     const subscribers = new Set<Subscriber>();
-    const cleanup = (subscriber: Subscriber) => subscribers.delete(subscriber);
+    const deleteSubscriber = (subscriber: Subscriber) => subscribers.delete(subscriber);
 
     return function (updater?: any): any {
         if (!arguments.length) {
             if (currentSubscriber) {
                 subscribers.add(currentSubscriber);
-                currentSubscriber.cleanups.add(cleanup);
+                currentSubscriber.cleanups.add(deleteSubscriber);
             }
 
             return value;
@@ -60,9 +62,8 @@ export const compute = <Type>(func: (() => Type) | State<Type>) => {
         return func();
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-    const tmp = currentSubscriber!;
-    const subscriber: Subscriber = { callback: () => {}, cleanups: new Set() };
+    const tmp = currentSubscriber;
+    const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
 
     currentSubscriber = subscriber;
 
@@ -76,8 +77,8 @@ export const compute = <Type>(func: (() => Type) | State<Type>) => {
 };
 
 export interface Effect {
-    (callback: () => void | (() => void)): () => void;
-    <Type>(func: (() => Type) | State<Type> | Event<Type>, callback: (value: Type) => void | (() => void)): () => void;
+    (callback: () => void): () => void;
+    <Type>(func: (() => Type) | State<Type> | Event<Type>, callback: (value: Type) => void): () => void;
 }
 
 export const effect: Effect = (
@@ -89,7 +90,7 @@ export const effect: Effect = (
     }
 
     const tmp = currentSubscriber;
-    const subscriber: Subscriber = { callback: () => {}, cleanups: new Set() };
+    const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
 
     currentSubscriber = subscriber;
     func();
@@ -103,7 +104,7 @@ export const effect: Effect = (
     return () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
 };
 
-const init = () => ({ subscriber: { callback: () => {}, cleanups: new Set<(subscriber: Subscriber) => any>() } });
+const init = (): { subscriber: Subscriber } => ({ subscriber: { callback: noop, cleanups: new Set() } });
 
 const reducer = ({ subscriber }: { subscriber: Subscriber }) => ({ subscriber });
 
@@ -122,6 +123,7 @@ export const useObserver = <Type>(func: (() => Type) | State<Type>) => {
     currentSubscriber = tmp;
     subscriber.callback = () => {
         subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+        subscriber.cleanups.clear();
         forceUpdate();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
