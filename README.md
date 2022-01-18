@@ -35,8 +35,8 @@ const Counter = observer(() => (
 ## Principles
 
 1. Create your states with `createState`.
-2. Read state by calling state without arguments `state()` anywhere.
-3. Write state by calling state with updater argument `state(value)` anywhere.
+2. Read state by calling `state()` anywhere.
+3. Write state by calling `state(value)` anywhere.
 4. Bind your components with `observer` HOC or `useObserver` hook.
 5. Use inline computed by `compute`.
 
@@ -53,6 +53,7 @@ npm install --save react-tagged-state
 - [observer](#observer)
 - [useObserver](#useobserver)
 - [effect](#effect)
+- [cleanup](#cleanup)
 - [compute](#compute)
 
 ### createState
@@ -117,7 +118,7 @@ interface createEvent {
 }
 ```
 
-This is a [event](#event) fabric.
+This is an [event](#event) fabric.
 
 ```javascript
 import { createEvent } from 'react-tagged-state';
@@ -208,7 +209,7 @@ This is a reaction.
 
 This hook will call `func` immediately and will call `func` and re-render component anytime when states thus `func` reads were changed.
 
-You should prefer [`observer`](#observer) for components but [`useObserver`](#useobserver) useful for custom hooks. Anyway you can use this hook for components if you don't like HOC's.
+You should prefer [`observer`](#observer) for components but [`useObserver`](#useobserver) useful for custom hooks.
 
 ```javascript
 import {
@@ -260,11 +261,7 @@ If [`effect`](#effect) called with one argument then it will call `callback` imm
 
 If [`effect`](#effect) called with two arguments then it will call `func` immediately and will re-call `func` and `callback` with `func` returned value anytime when some states thus `func` reads were changed.
 
-Deps will be tracked once, so you need to avoid reading states inside conditions. Rules for hooks in _React_ are allowed here.
-
-You can safety use `effect` inside other reactions.
-
-You can use `effect` with two arguments to subscribe to [`event`](#event), [`state`](#state) or [`compute`](#compute).
+You can use `effect` inside other reactions.
 
 ```javascript
 import {
@@ -275,31 +272,69 @@ import {
 const counterState = createState(0);
 
 // Run effect
-const cleanupEffect = effect(() => {
+const clear = effect(() => {
   console.log(counterState());
 });
 
 // Clear effect
-cleanupEffect();
+clear();
 
-// Run subscription
-const cleanupSubscription = effect(
+// Subscribe
+const unsubscribe = effect(
   counterState,
   (counter) => {
     console.log(counter);
   }
 );
 
-// Clear subscription
-cleanupSubscription();
+// Unsubscribe
+unsubscribe();
 ```
 
 ---
 
+### cleanup
+
+```typescript
+interface cleanup {
+  (func: () => any): void;
+}
+```
+
+This adds cleanup `func` for current reaction
+
+```javascript
+import {
+  createState,
+  effect,
+  cleanup
+} from 'react-tagged-state';
+
+const counterState = createState(0);
+
+effect(() => {
+  console.log(counterState());
+
+  const handleScroll = (event) => {
+    console.log(event);
+  };
+
+  window.addEventListener('scroll', handleScroll);
+
+  // Will be called before next effect call
+  cleanup(() => {
+    window.removeEventListener(
+      'scroll',
+      handleScroll
+    );
+  });
+});
+```
+
 ### compute
 
 ```typescript
-interface Compute {
+interface compute {
   <Type>(func: () => Type): Type;
 }
 ```
@@ -312,7 +347,7 @@ It can optimize your reactions: reactions will be triggered if value that `func`
 
 Think about it like a `useSelector` hook from _react-redux_.
 
-Deps will be tracked once, so you need to avoid reading states inside conditions. Rules for hooks in _React_ are allowed here.
+Deps will be tracked once, so you should avoid reading states inside conditions (rules similar to _react hooks_).
 
 ```javascript
 import {
