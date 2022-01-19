@@ -9,6 +9,12 @@ interface Subscriber {
 
 let currentSubscriber: Subscriber | null = null;
 
+export const cleanup = (func: () => any) => {
+    if (currentSubscriber) {
+        currentSubscriber.cleanups.add(func);
+    }
+};
+
 export interface State<Type> {
     (): Type;
     (updater: Type | ((value: Type) => Type)): void;
@@ -48,35 +54,32 @@ export const createEvent = <Type = void>(): Event<Type> => {
 
     return Object.assign((value: Type) => subscribers.forEach((subscriber) => subscriber(value)), {
         _subscribe: (callback: (value: Type) => any) => {
-            const subscriber = (value: Type) => () => Promise.resolve().then(() => callback(value));
-
-            subscribers.add(subscriber);
+            subscribers.add(callback);
 
             return () => {
-                subscribers.delete(subscriber);
+                subscribers.delete(callback);
             };
         }
     });
 };
 
 export const compute = <Type>(func: (() => Type) | State<Type>) => {
-    if (!currentSubscriber) {
-        return func();
+    if (currentSubscriber) {
+        const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
+        const tmp = currentSubscriber;
+
+        currentSubscriber = subscriber;
+
+        const value = func();
+
+        currentSubscriber = tmp;
+        subscriber.callback = () => value !== func() && tmp.callback();
+        tmp.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
+
+        return value;
     }
 
-    const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
-    const tmp = currentSubscriber;
-
-    currentSubscriber = subscriber;
-
-    const value = func();
-
-    currentSubscriber = tmp;
-
-    subscriber.callback = () => value !== func() && tmp.callback();
-    currentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
-
-    return value;
+    return func();
 };
 
 export interface Effect {
@@ -89,10 +92,6 @@ export const effect: Effect = (
     callback?: (value: any) => void | (() => void)
 ): (() => void) => {
     const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
-
-    if (currentSubscriber) {
-        currentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
-    }
 
     if ('_subscribe' in func) {
         if (callback) {
@@ -123,13 +122,11 @@ export const effect: Effect = (
         };
     }
 
-    return () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
-};
-
-export const cleanup = (func: () => any) => {
     if (currentSubscriber) {
-        currentSubscriber.cleanups.add(func);
+        currentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
     }
+
+    return () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
 };
 
 const init = (): { subscriber: Subscriber } => ({ subscriber: { callback: noop, cleanups: new Set() } });
@@ -139,6 +136,13 @@ const reducer = ({ subscriber }: { subscriber: Subscriber }) => ({ subscriber })
 export const useObserver = <Type>(func: (() => Type) | State<Type>) => {
     const [{ subscriber }, forceUpdate] = useReducer(reducer, null, init);
 
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    useEffect(() => () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)), []);
+    subscriber.callback = () => {
+        subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+        subscriber.cleanups.clear();
+        Promise.resolve().then(forceUpdate);
+    };
     subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
     subscriber.cleanups.clear();
 
@@ -149,13 +153,6 @@ export const useObserver = <Type>(func: (() => Type) | State<Type>) => {
     const value = func();
 
     currentSubscriber = tmp;
-    subscriber.callback = () => {
-        subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
-        subscriber.cleanups.clear();
-        Promise.resolve().then(forceUpdate);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)), []);
 
     return value;
 };
