@@ -59,23 +59,6 @@ export const createEvent = <Type = void>(): Event<Type> => {
     });
 };
 
-const cleanupSubscriber = (subscriber: Subscriber) => {
-    subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
-    subscriber.cleanups.clear();
-};
-
-const track = <Type>(func: (() => Type) | State<Type>, subscriber: Subscriber) => {
-    const tmp = currentSubscriber;
-
-    currentSubscriber = subscriber;
-
-    const value = func();
-
-    currentSubscriber = tmp;
-
-    return value;
-};
-
 export const compute = <Type>(func: (() => Type) | State<Type>) => {
     if (!currentSubscriber) {
         return func();
@@ -86,17 +69,17 @@ export const compute = <Type>(func: (() => Type) | State<Type>) => {
 
     currentSubscriber = subscriber;
 
-    const value = track(func, subscriber);
+    const value = func();
 
     currentSubscriber = tmp;
 
     subscriber.callback = () => value !== func() && tmp.callback();
-    currentSubscriber.cleanups.add(() => cleanupSubscriber(subscriber));
+    currentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
 
     return value;
 };
 
-interface Effect {
+export interface Effect {
     (callback: () => any): () => void;
     <Type>(func: (() => Type) | State<Type> | Event<Type>, callback: (value: Type) => any): () => void;
 }
