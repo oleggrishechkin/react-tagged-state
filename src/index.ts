@@ -9,6 +9,31 @@ interface Subscriber {
 
 let currentSubscriber: Subscriber | null = null;
 
+const getSubscription = () => {
+    const subscribers = new Set<Subscriber>();
+    const deleteSubscriber = (subscriber: Subscriber) => subscribers.delete(subscriber);
+
+    return { subscribers, deleteSubscriber };
+};
+
+let batched: Map<Set<Subscriber>, () => any> | null = null;
+
+export const batch = <Type = void>(func: () => Type) => {
+    if (batched) {
+        return func();
+    }
+
+    batched = new Map();
+
+    const result = func();
+
+    batched.forEach((changeSubscription) => changeSubscription());
+    batched.forEach((changeSubscription, subscribers) => subscribers.forEach((subscriber) => subscriber.callback()));
+    batched = null;
+
+    return result;
+};
+
 export interface State<Type> {
     (): Type;
     (updater: Type | ((value: Type) => Type)): void;
@@ -16,8 +41,7 @@ export interface State<Type> {
 
 export const createState = <Type>(initialValue: (() => Type) | Type): State<Type> => {
     let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
-    const subscribers = new Set<Subscriber>();
-    const deleteSubscriber = (subscriber: Subscriber) => subscribers.delete(subscriber);
+    let { subscribers, deleteSubscriber } = getSubscription();
 
     return function (updater?: any): any {
         if (arguments.length) {
@@ -25,7 +49,11 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
 
             if (nextValue !== value) {
                 value = nextValue;
-                subscribers.forEach((subscriber) => subscriber.callback());
+                batch(() => {
+                    batched!.set(subscribers, () => {
+                        ({ subscribers, deleteSubscriber } = getSubscription());
+                    });
+                });
             }
         }
 
@@ -48,7 +76,7 @@ export const createEvent = <Type = void>(): Event<Type> => {
 
     return Object.assign((value: Type) => subscribers.forEach((subscriber) => subscriber(value)), {
         _subscribe: (callback: (value: Type) => any) => {
-            const subscriber = (value: Type) => () => Promise.resolve().then(() => callback(value));
+            const subscriber = (value: Type) => () => callback(value);
 
             subscribers.add(subscriber);
 
@@ -65,16 +93,29 @@ export const compute = <Type>(func: (() => Type) | State<Type>) => {
     }
 
     const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
-    const tmp = currentSubscriber;
+    const parentSubscriber = currentSubscriber;
 
     currentSubscriber = subscriber;
 
-    const value = func();
+    let value = func();
 
-    currentSubscriber = tmp;
+    currentSubscriber = parentSubscriber;
 
-    subscriber.callback = () => value !== func() && tmp.callback();
-    currentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
+    subscriber.callback = () => {
+        const tmp = currentSubscriber;
+
+        currentSubscriber = subscriber;
+
+        const nextValue = func();
+
+        currentSubscriber = tmp;
+
+        if (nextValue !== value) {
+            value = nextValue;
+            parentSubscriber.callback();
+        }
+    };
+    parentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
 
     return value;
 };
@@ -107,19 +148,18 @@ export const effect: Effect = (
         subscriber.callback = () => {
             subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
             subscriber.cleanups.clear();
-            Promise.resolve().then(() => {
-                const tmp = currentSubscriber;
 
-                currentSubscriber = subscriber;
+            const tmp = currentSubscriber;
 
-                const value = func();
+            currentSubscriber = subscriber;
 
-                currentSubscriber = tmp;
+            const value = func();
 
-                if (callback) {
-                    callback(value);
-                }
-            });
+            currentSubscriber = tmp;
+
+            if (callback) {
+                callback(value);
+            }
         };
     }
 
@@ -152,7 +192,7 @@ export const useObserver = <Type>(func: (() => Type) | State<Type>) => {
     subscriber.callback = () => {
         subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
         subscriber.cleanups.clear();
-        Promise.resolve().then(forceUpdate);
+        forceUpdate();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
     useEffect(() => () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)), []);
