@@ -28,7 +28,7 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
 
     return function (updater?: any): any {
         if (arguments.length) {
-            if (updater.raw) {
+            if (updater && updater.raw) {
                 return (callback: (value: Type) => any) => {
                     const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
 
@@ -68,7 +68,7 @@ export const createEvent = <Type = void>(): Event<Type> => {
     const subscribers = new Set<(value: Type) => any>();
 
     return (value: any): any => {
-        if (value.raw) {
+        if (value && value.raw) {
             return (callback: (value: Type) => any) => {
                 subscribers.add(callback);
 
