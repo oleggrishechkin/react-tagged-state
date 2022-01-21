@@ -18,15 +18,30 @@ export const cleanup = (func: () => any) => {
 export interface State<Type> {
     (): Type;
     (updater: Type | ((value: Type) => Type)): void;
+    (string: TemplateStringsArray, ...keys: any[]): (callback: (value: Type) => any) => () => void;
 }
 
 export const createState = <Type>(initialValue: (() => Type) | Type): State<Type> => {
-    let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
     const subscribers = new Set<Subscriber>();
     const deleteSubscriber = (subscriber: Subscriber) => subscribers.delete(subscriber);
+    let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
 
     return function (updater?: any): any {
         if (arguments.length) {
+            if (updater.raw) {
+                return (callback: (value: Type) => any) => {
+                    const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
+
+                    subscriber.callback = () => callback(value);
+
+                    subscribers.add(subscriber);
+
+                    return () => {
+                        subscribers.delete(subscriber);
+                    };
+                };
+            }
+
             const nextValue = typeof updater === 'function' ? updater(value) : updater;
 
             if (nextValue !== value) {
@@ -46,24 +61,28 @@ export const createState = <Type>(initialValue: (() => Type) | Type): State<Type
 
 export interface Event<Type> {
     (value: Type): void;
-    readonly _subscribe: (callback: (value: Type) => any) => () => void;
+    (string: TemplateStringsArray, ...keys: any[]): (callback: (value: Type) => any) => () => void;
 }
 
 export const createEvent = <Type = void>(): Event<Type> => {
     const subscribers = new Set<(value: Type) => any>();
 
-    return Object.assign((value: Type) => subscribers.forEach((subscriber) => subscriber(value)), {
-        _subscribe: (callback: (value: Type) => any) => {
-            subscribers.add(callback);
+    return (value: any): any => {
+        if (value.raw) {
+            return (callback: (value: Type) => any) => {
+                subscribers.add(callback);
 
-            return () => {
-                subscribers.delete(callback);
+                return () => {
+                    subscribers.add(callback);
+                };
             };
         }
-    });
+
+        subscribers.forEach((subscriber) => subscriber(value));
+    };
 };
 
-export const compute = <Type>(func: (() => Type) | State<Type>) => {
+export const compute = <Type>(func: () => Type) => {
     if (currentSubscriber) {
         const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
         const tmp = currentSubscriber;
@@ -82,48 +101,27 @@ export const compute = <Type>(func: (() => Type) | State<Type>) => {
     return func();
 };
 
-export interface Effect {
-    (callback: () => any): () => void;
-    <Type>(func: (() => Type) | State<Type> | Event<Type>, callback: (value: Type) => any): () => void;
-}
-
-export const effect: Effect = (
-    func: (...args: any[]) => any,
-    callback?: (value: any) => void | (() => void)
-): (() => void) => {
+export const effect = (func: () => any) => {
     const subscriber: Subscriber = { callback: noop, cleanups: new Set() };
+    const tmp = currentSubscriber;
 
-    if ('_subscribe' in func) {
-        if (callback) {
-            subscriber.cleanups.add((func as Event<any>)._subscribe(callback));
-        }
-    } else {
-        const tmp = currentSubscriber;
+    currentSubscriber = subscriber;
+    func();
+    currentSubscriber = tmp;
+    subscriber.callback = () => {
+        subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
+        subscriber.cleanups.clear();
+        Promise.resolve().then(() => {
+            const tmp = currentSubscriber;
 
-        currentSubscriber = subscriber;
-        func();
-        currentSubscriber = tmp;
-        subscriber.callback = () => {
-            subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));
-            subscriber.cleanups.clear();
-            Promise.resolve().then(() => {
-                const tmp = currentSubscriber;
+            currentSubscriber = subscriber;
+            func();
+            currentSubscriber = tmp;
+        });
+    };
 
-                currentSubscriber = subscriber;
-
-                const value = func();
-
-                currentSubscriber = tmp;
-
-                if (callback) {
-                    callback(value);
-                }
-            });
-        };
-    }
-
-    if (currentSubscriber) {
-        currentSubscriber.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
+    if (tmp) {
+        tmp.cleanups.add(() => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber)));
     }
 
     return () => subscriber.cleanups.forEach((cleanup) => cleanup(subscriber));

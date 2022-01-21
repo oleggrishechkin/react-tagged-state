@@ -37,7 +37,7 @@ const Counter = observer(() => (
 1. Create your states with `createState`.
 2. Read state by calling `state()` anywhere.
 3. Write state by calling `state(value)` anywhere.
-4. Bind your components with `observer` HOC or `useObserver` hook.
+4. Bind your components with `observer` HOC.
 5. Use inline computed by `compute`.
 
 ## Installation
@@ -51,10 +51,10 @@ npm install --save react-tagged-state
 - [createState](#createstate)
 - [createEvent](#createevent)
 - [observer](#observer)
-- [useObserver](#useobserver)
+- [compute](#compute)
 - [effect](#effect)
 - [cleanup](#cleanup)
-- [compute](#compute)
+- [useObserver](#useobserver)
 
 ### createState
 
@@ -85,13 +85,14 @@ const anotherCounterState = createState(() => 0);
 ```typescript
 interface State<Type> {
   (): Type;
-  (updater: ((value: Type) => Type) | Type): void;
+  (updater: Type | ((value: Type) => Type)): void;
+  (string: TemplateStringsArray, ...keys: any[]): (callback: (value: Type) => any) => () => void;
 }
 ```
 
 This is a base part of the state system.
 
-You can use it for read and write state.
+You can use it for read and write state or subscriber to state.
 
 ```javascript
 import { counterState } from 'react-tagged-state';
@@ -106,6 +107,12 @@ counterState(1000);
 
 // Write with function
 counterState((counter) => counter + 1);
+
+// Subscribe
+const unsubscribe = counterState``((counter) => console.log(counter));
+
+// Unsubscribe
+unsubscribe();
 ```
 
 ---
@@ -132,13 +139,14 @@ const resetEvent = createEvent();
 
 ```typescript
 interface Event<Type> {
-  (payload: Type): void;
+  (value: Type): void;
+  (string: TemplateStringsArray, ...keys: any[]): (callback: (value: Type) => any) => () => void;
 }
 ```
 
 This is a base part of the event system.
 
-You can use it for dispatch event.
+You can use it for dispatch event or subscribe to event.
 
 ```javascript
 import { createEvent } from 'react-tagged-state';
@@ -147,6 +155,12 @@ const resetEvent = createEvent();
 
 // Dispatch
 resetEvent();
+
+// Subscribe
+const unsubscribe = resetEvent``(() => console.log('reset'));
+
+// Unsubscribe
+unsubscribe();
 ```
 
 ---
@@ -193,7 +207,119 @@ const Counter = observer(() => (
 ));
 ```
 
+___
+
+### compute
+
+```typescript
+interface compute {
+  <Type>(func: () => Type): Type;
+}
+```
+
+This is inline computed.
+
+This is a reaction (only if you use it inside another reaction).
+
+It can optimize your reactions: reactions will be triggered if value that `func` returns was changed.
+
+Think about it like a `useSelector` hook from _react-redux_.
+
+Deps will be tracked once, so you should avoid reading states inside conditions (rules similar to _react hooks_).
+
+```javascript
+import {
+  createState,
+  observer,
+  compute
+} from 'react-tagged-state';
+
+const usersState = createState({
+  id1: { id: 'id1', fullName: 'Adam Sandler' },
+  id2: { id: 'id2', fullName: 'Oleg Grishechkin' }
+  //...
+});
+
+// Re-render UserCard if usersState()[userId].fullName was changed
+const UserCard = observer(({ userId }) => (
+  <div>
+    {compute(() => usersState()[userId].fullName)}
+  </div>
+));
+```
+
 ---
+
+### effect
+
+```typescript
+export interface Effect {
+  (func: () => any): () => void;
+}
+```
+
+This is a reaction.
+
+It will call `func` immediately and will re-call `func` anytime when some states thus `func` reads were changed.
+
+```javascript
+import {
+  createState,
+  effect
+} from 'react-tagged-state';
+
+const counterState = createState(0);
+
+// Run effect
+const clear = effect(() => {
+  console.log(counterState());
+});
+
+// Clear effect
+clear();
+```
+
+---
+
+### cleanup
+
+```typescript
+interface cleanup {
+  (func: () => any): void;
+}
+```
+
+This adds cleanup `func` for current `effect`
+
+```javascript
+import {
+  createState,
+  effect,
+  cleanup
+} from 'react-tagged-state';
+
+const counterState = createState(0);
+
+effect(() => {
+  console.log(counterState());
+
+  const handleScroll = (event) => {
+    console.log(event);
+  };
+
+  window.addEventListener('scroll', handleScroll);
+
+  // Will be called before next effect call
+  cleanup(() => {
+    window.removeEventListener(
+      'scroll',
+      handleScroll
+    );
+  });
+});
+```
+
+___
 
 ### useObserver
 
@@ -236,138 +362,6 @@ const Counter = () => {
     </button>
   );
 };
-```
-
----
-
-### effect
-
-```typescript
-export interface Effect {
-  (callback: () => void): () => void;
-  <Type>(
-    func:
-      | (() => Type)
-      | State<Type>
-      | Event<Type>,
-    callback: (value: Type) => void
-  ): () => void;
-}
-```
-
-This is a reaction.
-
-If [`effect`](#effect) called with one argument then it will call `callback` immediately and will re-call `callback` anytime when some states thus `callback` reads were changed.
-
-If [`effect`](#effect) called with two arguments then it will call `func` immediately and will re-call `func` and `callback` with `func` returned value anytime when some states thus `func` reads were changed.
-
-You can use `effect` inside other reactions.
-
-```javascript
-import {
-  createState,
-  effect
-} from 'react-tagged-state';
-
-const counterState = createState(0);
-
-// Run effect
-const clear = effect(() => {
-  console.log(counterState());
-});
-
-// Clear effect
-clear();
-
-// Subscribe
-const unsubscribe = effect(
-  counterState,
-  (counter) => {
-    console.log(counter);
-  }
-);
-
-// Unsubscribe
-unsubscribe();
-```
-
----
-
-### cleanup
-
-```typescript
-interface cleanup {
-  (func: () => any): void;
-}
-```
-
-This adds cleanup `func` for current reaction
-
-```javascript
-import {
-  createState,
-  effect,
-  cleanup
-} from 'react-tagged-state';
-
-const counterState = createState(0);
-
-effect(() => {
-  console.log(counterState());
-
-  const handleScroll = (event) => {
-    console.log(event);
-  };
-
-  window.addEventListener('scroll', handleScroll);
-
-  // Will be called before next effect call
-  cleanup(() => {
-    window.removeEventListener(
-      'scroll',
-      handleScroll
-    );
-  });
-});
-```
-
-### compute
-
-```typescript
-interface compute {
-  <Type>(func: () => Type): Type;
-}
-```
-
-This is inline computed.
-
-This is a reaction (only if you use it inside another reaction).
-
-It can optimize your reactions: reactions will be triggered if value that `func` returns was changed.
-
-Think about it like a `useSelector` hook from _react-redux_.
-
-Deps will be tracked once, so you should avoid reading states inside conditions (rules similar to _react hooks_).
-
-```javascript
-import {
-  createState,
-  observer,
-  compute
-} from 'react-tagged-state';
-
-const usersState = createState({
-  id1: { id: 'id1', fullName: 'Adam Sandler' },
-  id2: { id: 'id2', fullName: 'Oleg Grishechkin' }
-  //...
-});
-
-// Re-render UserCard if usersState()[userId].fullName was changed
-const UserCard = observer(({ userId }) => (
-  <div>
-    {compute(() => usersState()[userId].fullName)}
-  </div>
-));
 ```
 
 ## Performance
