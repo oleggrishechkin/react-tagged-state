@@ -13,32 +13,83 @@ Inspired by awesome [_solid-js_](https://www.solidjs.com/) and [_S.js_](https://
 
 ## Basic Usage
 
+with signal
+
 ```javascript
 import {
-  createState,
-  observer
+  createSignal,
+  useMutable
 } from 'react-tagged-state';
 
-const counterState = createState(0);
+/* Create signal */
+const counterSignal = createSignal(0);
 
-const Counter = observer(() => (
-  <button
-    onClick={() => {
-      counterState((value) => value + 1);
-    }}
-  >
-    {counterState()}
-  </button>
-));
+const Counter = () => {
+  /* Bind */
+  useMutable(counterSignal);
+
+  return (
+    <button
+      onClick={() => {
+        /* Write */
+        counterState((value) => value + 1);
+      }}
+    >
+      {/* Read */}
+      {counterState()}
+    </button>
+  );
+};
 ```
 
-## Principles
+or with mutable object
 
-1. Create your states with `createState`.
-2. Read state by calling `state()` anywhere.
-3. Write state by calling `state(value)` anywhere.
-4. Bind your components with `observer` HOC.
-5. Use inline computed by `compute`.
+```javascript
+import {
+  useMutable,
+  mutate
+} from 'react-tagged-state';
+
+/* Create mutable object */
+const counterRef = { current: 0 };
+
+const Counter = () => {
+  /* Bind */
+  useMutable(counterRef);
+
+  return (
+    <button
+      onClick={() => {
+        /* Write */
+        mutate(
+          (mark) =>
+            (mark(counterRef).current += 1)
+        );
+      }}
+    >
+      {/* Read */}
+      {counterRef.current}
+    </button>
+  );
+};
+```
+
+## Short overview
+
+You can create immutable signals by `createSignal`.<br>
+Read value by `singal()` and write value by `signal(value)`.<br>
+Bind signal by reading into `useComputed` and `runEffect` or directly via `useMutable`.
+
+You can observe any mutable objects you want.<br>
+Bind mutable object by marking via `mark` callback into `useComputed` and `runEffect` or directly via `useMutable`.<br>
+Mutate object into `mutate` with marking via `mark` callback.
+
+You can create events by `createEvent`.<br>
+Dispatch payload by `event(payload)`.<br>
+
+You can subscribe to `signal`, `event` or mutable object by `subscribe`.
+
+You can batch writings, mutations and dispatches by `mutate`.
 
 ## Installation
 
@@ -48,70 +99,74 @@ npm install --save react-tagged-state
 
 ## API Reference
 
-- [createState](#createstate)
+- [createSignal](#createsignal)
+- [signal](#signal)
 - [createEvent](#createevent)
-- [observer](#observer)
-- [compute](#compute)
-- [effect](#effect)
-- [cleanup](#cleanup)
-- [useObserver](#useobserver)
+- [event](#event)
+- [subscribe](#subscribe)
+- [mutate](#mutate)
+- [runEffect](#runeffect)
+- [useMutable](#usemutable)
+- [useComputed](#usecomputed)
 
-### createState
+### createSignal
 
 ```typescript
-interface createState {
+interface createSignal {
   <Type>(
-    initialValue: (() => Type) | Type
-  ): State<Type>;
+    initialValue: Type | (() => Type)
+  ): Signal<Type>;
 }
 ```
 
-This is a [state](#state) fabric.
+This is a [signal](#signal) fabric.
 
 ```javascript
-import { createState } from 'react-tagged-state';
+import { createSignal } from 'react-tagged-state';
 
-// Initialize with value
-const counterState = createState(0);
+let counterSignal;
 
-// Initialize with function
-const anotherCounterState = createState(() => 0);
+/* Initialize with value */
+counterSignal = createSignal(0);
+
+/* Initialize with function */
+counterSignal = createSignal(() => 0);
 ```
 
 ---
 
-### state
+### signal
 
 ```typescript
-interface State<Type> {
+interface Signal<Type> {
   (): Type;
   (updater: Type | ((value: Type) => Type)): void;
-  (string: TemplateStringsArray, ...keys: any[]): (callback: (value: Type) => any) => () => void;
 }
 ```
 
-This is a base part of the state system.
-
-You can use it for read and write state or subscriber to state.
+You can use it for read value and write value.
 
 ```javascript
-import { counterState } from 'react-tagged-state';
+import { createSignal } from 'react-tagged-state';
 
-const counterState = createState(0);
+const counterSignal = createSignal(0);
 
-// Read
-const counter = counterState();
+/* Read */
+const counter = counterSignal();
 
-// Write with value
-counterState(1000);
+/* Write with value */
+counterSignal(1000);
 
-// Write with function
-counterState((counter) => counter + 1);
+/* Write with function */
+counterSignal((counter) => counter + 1);
 
-// Subscribe
-const unsubscribe = counterState``((counter) => console.log(counter));
+/* Subscribe */
+const unsubscribe = subscribe(
+  counterState,
+  (counter) => console.log(counter)
+);
 
-// Unsubscribe
+/* Unsubscribe */
 unsubscribe();
 ```
 
@@ -130,6 +185,7 @@ This is an [event](#event) fabric.
 ```javascript
 import { createEvent } from 'react-tagged-state';
 
+/* Create */
 const resetEvent = createEvent();
 ```
 
@@ -140,227 +196,243 @@ const resetEvent = createEvent();
 ```typescript
 interface Event<Type> {
   (value: Type): void;
-  (string: TemplateStringsArray, ...keys: any[]): (callback: (value: Type) => any) => () => void;
 }
 ```
 
-This is a base part of the event system.
-
-You can use it for dispatch event or subscribe to event.
+You can use it for dispatch payload.
 
 ```javascript
 import { createEvent } from 'react-tagged-state';
 
 const resetEvent = createEvent();
 
-// Dispatch
+/* Dispatch */
 resetEvent();
 
-// Subscribe
-const unsubscribe = resetEvent``(() => console.log('reset'));
+/* Subscribe */
+const unsubscribe = subscribe(resetEvent, () =>
+  console.log('reset')
+);
 
-// Unsubscribe
+/* Unsubscribe */
 unsubscribe();
 ```
 
 ---
 
-### observer
+### subscribe
 
 ```typescript
-interface observer {
-  <
-    Type extends
-      | FunctionComponent<any>
-      | ForwardRefRenderFunction<any, any>
-  >(
-    wrappedComponent: Type
+interface Subscribe {
+  <Type>(
+    event: Event<Type>,
+    callback: (value: Type) => void
+  ): () => void;
+  <Type>(
+    signal: Signal<Type>,
+    callback: (value: Type) => void
+  ): () => void;
+  <Type>(
+    obj: Type,
+    callback: (value: Type) => void
+  ): () => void;
+}
+```
+
+It will call `callback` anytime when `obj` was mutated, `signal` was changed or `event` was dispatched.
+
+```javascript
+import {
+  createSignal,
+  createEvent
+} from 'react-tagged-state';
+
+const counterSignal = createSignal(0);
+
+const resetEvent = createEvent();
+
+const counterRef = { current: 0 };
+
+let unsubscribe;
+
+/* Subscribe to signal */
+unsubscribe = subscribe(counterState, (counter) =>
+  console.log(counter)
+);
+
+/* Unsubscribe */
+unsubscribe();
+
+/* Subscribe to event */
+unsubscribe = subscribe(resetEvent, () =>
+  console.log('reset')
+);
+
+/* Unsubscribe */
+unsubscribe();
+
+/* Subscribe to mutable object */
+unsubscribe = subscribe(counterRef, () =>
+  console.log(counterRef.current)
+);
+
+/* Unsubscribe */
+unsubscribe();
+```
+
+---
+
+### mutate
+
+```typescript
+interface mutate {
+  <Type>(
+    func: (
+      mark: <Obj extends object>(obj: Obj) => Obj
+    ) => Type
   ): Type;
 }
 ```
 
-This is a React binding.
-
-This is a reaction.
-
-This HOC will re-render component anytime when some states thus component reads were changed.
-
-It's like `observer` HOC from _mobx-react-lite_.
+You should mutate your observable mutable objects into this function.<br>
+You can batch writings, mutations and dispatches by this function.
 
 ```javascript
 import {
-  createState,
-  observer
+  useMutable,
+  mutate
 } from 'react-tagged-state';
 
-const counterState = createState(0);
+const counterRef = { current: 0 };
 
-// Re-render Counter if counterState was changed
-const Counter = observer(() => (
-  <button
-    onClick={() => {
-      counterState((value) => value + 1);
-    }}
-  >
-    {counterState()}
-  </button>
-));
-```
-
-___
-
-### compute
-
-```typescript
-interface compute {
-  <Type>(func: () => Type): Type;
-}
-```
-
-This is inline computed.
-
-This is a reaction (only if you use it inside another reaction).
-
-It can optimize your reactions: reactions will be triggered if value that `func` returns was changed.
-
-Think about it like a `useSelector` hook from _react-redux_.
-
-Deps will be tracked once, so you should avoid reading states inside conditions (rules similar to _react hooks_).
-
-```javascript
-import {
-  createState,
-  observer,
-  compute
-} from 'react-tagged-state';
-
-const usersState = createState({
-  id1: { id: 'id1', fullName: 'Adam Sandler' },
-  id2: { id: 'id2', fullName: 'Oleg Grishechkin' }
-  //...
+/* Batch */
+mutate((mark) => {
+  /* Mark mutable object as mutated */
+  mark(counterRef).current += 1;
 });
-
-// Re-render UserCard if usersState()[userId].fullName was changed
-const UserCard = observer(({ userId }) => (
-  <div>
-    {compute(() => usersState()[userId].fullName)}
-  </div>
-));
 ```
 
 ---
 
-### effect
+### runEffect
 
 ```typescript
-export interface Effect {
-  (func: () => any): () => void;
+export interface runEffect {
+  (
+    func: (
+      mark: <Type extends object>(
+        obj: Type
+      ) => Type
+    ) => (() => void) | void
+  ): () => void;
 }
 ```
 
-This is a reaction.
-
-It will call `func` immediately and will re-call `func` anytime when some states thus `func` reads were changed.
-
-```javascript
-import {
-  createState,
-  effect
-} from 'react-tagged-state';
-
-const counterState = createState(0);
-
-// Run effect
-const clear = effect(() => {
-  console.log(counterState());
-});
-
-// Clear effect
-clear();
-```
-
----
-
-### cleanup
-
-```typescript
-interface cleanup {
-  (func: () => any): void;
-}
-```
-
-This adds cleanup `func` for current `effect`
+It will call `func` immediately and will re-call `func` anytime when some signals thus `func` reads were changed or marked mutable objects were mutated.<br>
+You can return cleanup function from `func`. It will be called before next `func` call or cleanup.
 
 ```javascript
 import {
-  createState,
-  effect,
-  cleanup
+  createSignal,
+  runEffect
 } from 'react-tagged-state';
 
-const counterState = createState(0);
+const signal = createSignal(0);
 
-effect(() => {
-  console.log(counterState());
+const ref = { current: 0 };
 
-  const handleScroll = (event) => {
-    console.log(event);
+/* Run */
+const cleanup = runEffect((mark) => {
+  /* Read singal */
+  console.log(signal());
+  /* Mark mutable object */
+  console.log(mark(ref).current);
+
+  /* Return cleanup function */
+  return () => {
+    console.log('cleanup');
   };
-
-  window.addEventListener('scroll', handleScroll);
-
-  // Will be called before next effect call
-  cleanup(() => {
-    window.removeEventListener(
-      'scroll',
-      handleScroll
-    );
-  });
 });
+
+/* Cleanup */
+cleanup();
 ```
 
-___
+---
 
-### useObserver
+### useMutable
 
 ```typescript
 interface useObserver {
-  <Type>(func: (() => Type) | State<Type>): Type;
+  <Type extends object>(obj: Type): Type;
 }
 ```
 
-This is a React binding.
-
-This is a reaction.
-
-This hook will call `func` immediately and will call `func` and re-render component anytime when states thus `func` reads were changed.
-
-You should prefer [`observer`](#observer) for components but [`useObserver`](#useobserver) useful for custom hooks.
+This hook will re-render Component anytime when `obj` was mutated (or changed if `obj` is a signal).
 
 ```javascript
 import {
-  createState,
-  observer
+  createSignal,
+  useMutable
 } from 'react-tagged-state';
 
-const counterState = createState(0);
+const counterSignal = createSignal(0);
 
-const useCounter = () =>
-  useObserver(counterState);
-
-// Re-render Counter if counterState was changed
+/* Re-render Counter if counterSignal was changed */
 const Counter = () => {
-  const counter = useCounter();
+  /* Bind */
+  useMutable(counterSignal);
 
   return (
     <button
       onClick={() => {
-        counterState((value) => value + 1);
+        counterSignal((value) => value + 1);
       }}
     >
-      {counter}
+      {counterSignal()}
     </button>
   );
+};
+```
+
+---
+
+### useComputed
+
+```typescript
+interface useComputed {
+  <Type>(
+    func: (
+      mark: <Obj extends object>(obj: Obj) => Obj
+    ) => Type
+  ): Type;
+}
+```
+
+It will call `func` immediately and will re-call `func` on each render and anytime when some signals thus `func` reads were changed or marked mutable objects were mutated.<br>
+This hook will re-render component anytime when value that `func` returns was changed.<br>
+Think about it like a useSelector from react-redux.
+
+```javascript
+import {
+  createSignal,
+  useComputed
+} from 'react-tagged-state';
+
+const usersSignal = createSignal({
+  id1: { id: 'id1', fullName: 'Adam Sandler' },
+  id2: { id: 'id2', fullName: 'Oleg Grishechkin' }
+  /* ... */
+});
+
+/* Re-render UserCard if usersSignal()[userId].fullName was changed */
+const UserCard = ({ userId }) => {
+  /* Bind */
+  const userFullName = useComputed(
+    () => usersSignal()[userId].fullName
+  );
+
+  return <div>{userFullName}</div>;
 };
 ```
 
