@@ -7,18 +7,18 @@
 [![NPM total downloads](https://img.shields.io/npm/dt/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-viewport-list?minimal=true)
 [![NPM monthly downloads](https://img.shields.io/npm/dm/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-viewport-list?minimal=true)
 
-⚛️ Experimental reactive and atomic state manager for React
+WIP
 
-Inspired by awesome [_solid-js_](https://www.solidjs.com/) and [_S.js_](https://github.com/adamhaile/S)
+⚛️ Experimental reactive and atomic state manager for React.
+
+Inspired by awesome [_solid-js_](https://www.solidjs.com/) and [_S.js_](https://github.com/adamhaile/S).
 
 ## Basic Usage
-
-with signal
 
 ```javascript
 import {
   createSignal,
-  useMutable
+  useTagged
 } from 'react-tagged-state';
 
 /* Create signal */
@@ -26,7 +26,7 @@ const counterSignal = createSignal(0);
 
 const Counter = () => {
   /* Bind */
-  useMutable(counterSignal);
+  const counter = useTagged(counterSignal);
 
   return (
     <button
@@ -35,61 +35,11 @@ const Counter = () => {
         counterState((value) => value + 1);
       }}
     >
-      {/* Read */}
-      {counterState()}
+      {counter}
     </button>
   );
 };
 ```
-
-or with mutable object
-
-```javascript
-import {
-  useMutable,
-  mutate
-} from 'react-tagged-state';
-
-/* Create mutable object */
-const counterRef = { current: 0 };
-
-const Counter = () => {
-  /* Bind */
-  useMutable(counterRef);
-
-  return (
-    <button
-      onClick={() => {
-        /* Write */
-        mutate(
-          (mark) =>
-            (mark(counterRef).current += 1)
-        );
-      }}
-    >
-      {/* Read */}
-      {counterRef.current}
-    </button>
-  );
-};
-```
-
-## Short overview
-
-You can create immutable signals by `createSignal`.<br>
-Read value by `singal()` and write value by `signal(value)`.<br>
-Bind signal by reading into `useComputed` and `runEffect` or directly via `useMutable`.
-
-You can observe any mutable objects you want.<br>
-Bind mutable object by marking via `mark` callback into `useComputed` and `runEffect` or directly via `useMutable`.<br>
-Mutate object into `mutate` with marking via `mark` callback.
-
-You can create events by `createEvent`.<br>
-Dispatch payload by `event(payload)`.<br>
-
-You can subscribe to `signal`, `event` or mutable object by `subscribe`.
-
-You can batch writings, mutations and dispatches by `mutate`.
 
 ## Installation
 
@@ -103,11 +53,12 @@ npm install --save react-tagged-state
 - [signal](#signal)
 - [createEvent](#createevent)
 - [event](#event)
+- [mutable](#mutable)
+- [mutated](#mutated)
 - [subscribe](#subscribe)
-- [mutate](#mutate)
-- [runEffect](#runeffect)
-- [useMutable](#usemutable)
-- [useComputed](#usecomputed)
+- [batch](#batch)
+- [useTagged](#usetagged)
+- [createEffect](#createeffect)
 
 ### createSignal
 
@@ -119,7 +70,7 @@ interface createSignal {
 }
 ```
 
-This is a [signal](#signal) fabric.
+This is a [signal](#signal) factory.
 
 ```javascript
 import { createSignal } from 'react-tagged-state';
@@ -140,11 +91,12 @@ counterSignal = createSignal(() => 0);
 ```typescript
 interface Signal<Type> {
   (): Type;
-  (updater: Type | ((value: Type) => Type)): void;
+  (updater: Type | ((value: Type) => Type)): Type;
 }
 ```
 
-You can use it for read value and write value.
+This function is a value container.<br>
+Signal will be added to the deps when you read its value inside [useTagged](#usetagged) or [createEffect](#createeffect).
 
 ```javascript
 import { createSignal } from 'react-tagged-state';
@@ -159,15 +111,6 @@ counterSignal(1000);
 
 /* Write with function */
 counterSignal((counter) => counter + 1);
-
-/* Subscribe */
-const unsubscribe = subscribe(
-  counterState,
-  (counter) => console.log(counter)
-);
-
-/* Unsubscribe */
-unsubscribe();
 ```
 
 ---
@@ -180,7 +123,7 @@ interface createEvent {
 }
 ```
 
-This is an [event](#event) fabric.
+This is an [event](#event) factory.
 
 ```javascript
 import { createEvent } from 'react-tagged-state';
@@ -194,12 +137,13 @@ const resetEvent = createEvent();
 ### event
 
 ```typescript
-interface Event<Type> {
-  (value: Type): void;
+interface Event<Type = void> {
+  (value: Type): Type;
 }
 ```
 
-You can use it for dispatch payload.
+This function is an event dispatcher.<br>
+You can use it for write multiple [signals](#signal) and [mutate](#mutate) multiple mutable objects.
 
 ```javascript
 import { createEvent } from 'react-tagged-state';
@@ -208,14 +152,72 @@ const resetEvent = createEvent();
 
 /* Dispatch */
 resetEvent();
+```
 
-/* Subscribe */
-const unsubscribe = subscribe(resetEvent, () =>
-  console.log('reset')
-);
+---
 
-/* Unsubscribe */
-unsubscribe();
+### mutable
+
+```typescript
+interface mutable {
+  <Type extends MutableObject>(obj: Type): Type;
+}
+```
+
+This is a getter for mutable objects.<br>
+`obj` will be added to the deps when you call [`mutable(obj)`](#mutate) inside [useTagged](#usetagged) or [createEffect](#createeffect).
+
+```javascript
+import {
+  useTagged,
+  mutable
+} from 'react-tagged-state';
+
+const counterRef = { current: 0 };
+
+/* Inside createEffect */
+createEffect(() => {
+  /* Mark object as mutable */
+  console.log(mutable(counterRef).current);
+});
+
+const Counter = () => {
+  /* Inside useTagged */
+  const counter = useTagged(() => {
+    /* Mark object as mutable */
+    return mutable(counterRef).current;
+  });
+
+  return <div>{counter}</div>;
+};
+```
+
+---
+
+### mutated
+
+```typescript
+interface mutated {
+  <Type extends MutableObject>(obj: Type): Type;
+}
+```
+
+This is a setter for mutable object.<br>
+You should call it **after** mutable object mutations.<br>
+
+```javascript
+import {
+  mutated,
+  useTagged
+} from 'react-tagged-state';
+
+const counterRef = { current: 0 };
+
+/* Mutate */
+counterRef.current += 1;
+
+/* Mark object as mutated */
+mutated(counterRef);
 ```
 
 ---
@@ -225,26 +227,26 @@ unsubscribe();
 ```typescript
 interface Subscribe {
   <Type>(
-    event: Event<Type>,
+    obj:
+      | Signal<Type>
+      | Event<Type>
+      | (() => Type),
     callback: (value: Type) => void
   ): () => void;
-  <Type>(
-    signal: Signal<Type>,
-    callback: (value: Type) => void
-  ): () => void;
-  <Type>(
+  <Type extends MutableObject>(
     obj: Type,
     callback: (value: Type) => void
   ): () => void;
 }
 ```
 
-It will call `callback` anytime when `obj` was mutated, `signal` was changed or `event` was dispatched.
+This function subscribe to signal writes, event dispatches or mutable object mutations.<br>
 
 ```javascript
 import {
   createSignal,
-  createEvent
+  createEvent,
+  subscribe
 } from 'react-tagged-state';
 
 const counterSignal = createSignal(0);
@@ -256,24 +258,38 @@ const counterRef = { current: 0 };
 let unsubscribe;
 
 /* Subscribe to signal */
-unsubscribe = subscribe(counterState, (counter) =>
-  console.log(counter)
+unsubscribe = subscribe(
+  counterState,
+  (counter) => {
+    console.log(counter);
+  }
 );
 
 /* Unsubscribe */
 unsubscribe();
 
 /* Subscribe to event */
-unsubscribe = subscribe(resetEvent, () =>
-  console.log('reset')
-);
+unsubscribe = subscribe(resetEvent, () => {
+  console.log('reset');
+});
 
 /* Unsubscribe */
 unsubscribe();
 
 /* Subscribe to mutable object */
-unsubscribe = subscribe(counterRef, () =>
-  console.log(counterRef.current)
+unsubscribe = subscribe(counterRef, () => {
+  console.log(counterRef.current);
+});
+
+/* Unsubscribe */
+unsubscribe();
+
+/* Subscribe to computed */
+unsubscribe = subscribe(
+  () => Math.floor(counterSignal() / 10),
+  (computed) => {
+    console.log(computed);
+  }
 );
 
 /* Unsubscribe */
@@ -282,59 +298,62 @@ unsubscribe();
 
 ---
 
-### mutate
+### batch
 
 ```typescript
-interface mutate {
-  <Type>(
-    func: (
-      mark: <Obj extends object>(obj: Obj) => Obj
-    ) => Type
-  ): Type;
+interface batch {
+  <Type>(func: () => Type): Type;
 }
 ```
 
-You should mutate your observable mutable objects into this function.<br>
-You can batch writings, mutations and dispatches by this function.
+This function collect signal writes, event dispatches and mutable object mutations and call all affected subscribers once.
 
 ```javascript
 import {
-  useMutable,
-  mutate
+  batch,
+  mutated,
+  createSignal,
+  createEvent
 } from 'react-tagged-state';
+
+const counterSignal = createSignal();
+
+const resetEvent = createEvent();
 
 const counterRef = { current: 0 };
 
 /* Batch */
-mutate((mark) => {
-  /* Mark mutable object as mutated */
-  mark(counterRef).current += 1;
+batch(() => {
+  /* For mutable object */
+  mutated(counterRef).current += 1;
+
+  /* For signal*/
+  counterSignal(1000);
+
+  /* For event */
+  resetEvent();
 });
 ```
 
 ---
 
-### runEffect
+### createEffect
 
 ```typescript
-export interface runEffect {
-  (
-    func: (
-      mark: <Type extends object>(
-        obj: Type
-      ) => Type
-    ) => (() => void) | void
-  ): () => void;
+export interface createEffect {
+  (func: () => void | (() => void)): () => void;
 }
 ```
 
-It will call `func` immediately and will re-call `func` anytime when some signals thus `func` reads were changed or marked mutable objects were mutated.<br>
-You can return cleanup function from `func`. It will be called before next `func` call or cleanup.
+`func` will be called immediately and anytime when related signals were written or mutable objects were mutated.<br>
+This function returns cleanup function.<br>
+You can return cleanup function from `func`. It will be called before next `func` call or cleanup function call.
 
 ```javascript
 import {
   createSignal,
-  runEffect
+  createEffect,
+  mutable
 } from 'react-tagged-state';
 
 const signal = createSignal(0);
@@ -342,11 +361,11 @@ const signal = createSignal(0);
 const ref = { current: 0 };
 
 /* Run */
-const cleanup = runEffect((mark) => {
+const cleanup = createEffect(() => {
   /* Read singal */
   console.log(signal());
   /* Mark mutable object */
-  console.log(mark(ref).current);
+  console.log(mutable(ref).current);
 
   /* Return cleanup function */
   return () => {
@@ -360,20 +379,23 @@ cleanup();
 
 ---
 
-### useMutable
+### useTagged
 
 ```typescript
-interface useObserver {
-  <Type extends object>(obj: Type): Type;
+interface UseTagged {
+  <Type>(obj: Signal<Type> | (() => Type)): Type;
+  <Type extends MutableObject>(obj: Type): object;
 }
 ```
 
-This hook will re-render Component anytime when `obj` was mutated (or changed if `obj` is a signal).
+This hook will re-render Component anytime when `obj` was written or mutated.
+
+With signal:
 
 ```javascript
 import {
   createSignal,
-  useMutable
+  useTagged
 } from 'react-tagged-state';
 
 const counterSignal = createSignal(0);
@@ -381,42 +403,38 @@ const counterSignal = createSignal(0);
 /* Re-render Counter if counterSignal was changed */
 const Counter = () => {
   /* Bind */
-  useMutable(counterSignal);
+  const counter = useTagged(counterSignal);
 
-  return (
-    <button
-      onClick={() => {
-        counterSignal((value) => value + 1);
-      }}
-    >
-      {counterSignal()}
-    </button>
-  );
+  return <div>{counter}</div>;
 };
 ```
 
----
+With mutable object:
 
-### useComputed
+```javascript
+import { useTagged } from 'react-tagged-state';
 
-```typescript
-interface useComputed {
-  <Type>(
-    func: (
-      mark: <Obj extends object>(obj: Obj) => Obj
-    ) => Type
-  ): Type;
-}
+/* Create mutable object */
+const counterRef = { current: 0 };
+
+/* Re-render Counter if counterRef was mutated */
+const Counter = () => {
+  /* Bind */
+  useTagged(counterRef);
+
+  return <div>{counterRef.current}</div>;
+};
 ```
 
-It will call `func` immediately and will re-call `func` on each render and anytime when some signals thus `func` reads were changed or marked mutable objects were mutated.<br>
-This hook will re-render component anytime when value that `func` returns was changed.<br>
-Think about it like a useSelector from react-redux.
+With computed:
+
+`obj` will be called immediately and anytime when related signals were written or mutable objects were mutated.<br>
+This hook will re-render component anytime when value that `obj` returns was changed.<br>
 
 ```javascript
 import {
   createSignal,
-  useComputed
+  useTagged
 } from 'react-tagged-state';
 
 const usersSignal = createSignal({
@@ -428,7 +446,7 @@ const usersSignal = createSignal({
 /* Re-render UserCard if usersSignal()[userId].fullName was changed */
 const UserCard = ({ userId }) => {
   /* Bind */
-  const userFullName = useComputed(
+  const userFullName = useTagged(
     () => usersSignal()[userId].fullName
   );
 

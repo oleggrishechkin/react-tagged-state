@@ -1,52 +1,33 @@
 /* eslint-disable @typescript-eslint/ban-types */
 import { useEffect, useReducer } from 'react';
 
-const noop = () => {};
+type Tagged = MutableObject | Signal<any> | Event<any>;
 
-const array: any[] = [];
+const run = <Type>(func: () => Type) => func();
 
-const run = (func: () => void) => func();
+const INTERNAL_SUBSCRIBE = Symbol();
 
-const arrayFrom = Array.from;
+const globalSubscribers = new WeakMap<Tagged, Set<() => void>>();
 
-const globalSubscribers = new WeakMap<object, Set<(value: any) => void>>();
+const globalVersions = new WeakMap<Tagged, object>();
 
-let globalObjs: object[] | null = null;
+let globalObjs: Tagged[] | null = null;
 
-let globalObjsMap: Map<object, any> | null = null;
+let globalObjsSet: Set<Tagged> | null = null;
 
-const get = <Type extends object>(obj: Type) => {
-    if (globalObjs) {
-        globalObjs.push(obj);
-    }
+const runWithObjs = <Type>(func: () => Type, objs: typeof globalObjs) => {
+    const tmp = globalObjs;
 
-    return obj;
+    globalObjs = objs;
+
+    const value = func();
+
+    globalObjs = tmp;
+
+    return value;
 };
 
-const set = <Type extends object, Payload>(obj: Type, payload?: Payload) => {
-    if (globalObjsMap) {
-        globalObjsMap.set(obj, payload || obj);
-    }
-
-    return obj;
-};
-
-interface Event<Type> {
-    (payload: Type): void;
-}
-
-interface Signal<Type> {
-    (): Type;
-    (updater: Type | ((value: Type) => Type)): void;
-}
-
-interface Subscribe {
-    <Type>(event: Event<Type>, callback: (value: Type) => void): () => void;
-    <Type>(signal: Signal<Type>, callback: (value: Type) => void): () => void;
-    <Type>(obj: Type, callback: (value: Type) => void): () => void;
-}
-
-const subscribe: Subscribe = (obj: any, callback: (value: any) => void) => {
+const subscribeTo = (obj: Tagged, callback: () => void) => {
     let subscribers = globalSubscribers.get(obj);
 
     if (!subscribers) {
@@ -61,185 +42,209 @@ const subscribe: Subscribe = (obj: any, callback: (value: any) => void) => {
     };
 };
 
-const shallowEqual = <Type extends any[]>(target: Type, source: Type) =>
-    target.length === source.length && target.every((item, index) => item === source[index]);
-
-const runEffect = (func: (mark: typeof get) => (() => void) | void) => {
-    const refs: { lastObjs: object[]; cleanups: (() => void)[]; cleanup: () => void } = {
-        lastObjs: array,
-        cleanups: array,
-        cleanup: noop
-    };
-    const effect = () => {
-        refs.cleanup();
-
-        const objs: object[] = [];
-
-        globalObjs = objs;
-
-        const value = func(get);
-
-        globalObjs = null;
-
-        if (!shallowEqual(objs, refs.lastObjs)) {
-            refs.lastObjs = objs;
-            refs.cleanups.forEach(run);
-            refs.cleanups = objs.map((obj) => subscribe(obj, effect));
-        }
-
-        refs.cleanup = typeof value === 'function' ? value : noop;
-    };
-
-    effect();
-
-    return () => {
-        refs.cleanup();
-        refs.cleanups.forEach(run);
-    };
-};
-
-const mutate = <Type>(func: (mark: typeof set) => Type) => {
-    if (globalObjsMap) {
-        return func(set);
+const batch = <Type>(func: () => Type) => {
+    if (globalObjsSet) {
+        return runWithObjs(func, null);
     }
 
-    const objsSet = new Map<object, any>();
+    const objsSet = new Set<Tagged>();
 
-    globalObjsMap = objsSet;
+    globalObjsSet = objsSet;
 
-    const value = func(set);
+    const value = runWithObjs(func, null);
 
-    globalObjsMap = null;
-    objsSet.forEach((payload, obj) => {
-        const subscribers = globalSubscribers.get(obj);
+    globalObjsSet = null;
 
-        if (subscribers) {
-            arrayFrom(subscribers).forEach((subscriber) => subscriber(payload));
+    if (objsSet.size) {
+        batch(() => {
+            const uniqueSubscribers = new Set<() => void>();
+
+            objsSet.forEach((obj) => {
+                const subscribers = globalSubscribers.get(obj);
+
+                if (subscribers) {
+                    subscribers.forEach((subscriber) => uniqueSubscribers.add(subscriber));
+                }
+            });
+            uniqueSubscribers.forEach(run);
+        });
+    }
+
+    return value;
+};
+
+const read = <Type extends Tagged>(obj: Type) => {
+    if (globalObjs) {
+        globalObjs.push(obj);
+    }
+};
+
+const write = <Type extends Tagged>(obj: Type) =>
+    batch(() => {
+        if (globalObjsSet) {
+            globalObjsSet.add(obj);
         }
     });
 
-    return value;
-};
+type MutableObject = Record<any, any> | any[] | Set<any> | Map<any, any> | WeakSet<any> | WeakMap<any, any>;
 
-const createEvent = <Type = void>() => {
-    const obj: Event<Type> = (payload: Type) =>
-        mutate((mark) => {
-            mark(obj, payload);
-        });
+const mutable = <Type extends MutableObject>(obj: Type) => {
+    read(obj);
 
     return obj;
 };
+
+const mutated = <Type extends MutableObject>(obj: Type) => {
+    globalVersions.set(obj, {});
+    write(obj);
+
+    return obj;
+};
+
+interface Signal<Type> {
+    (): Type;
+    (updater: Type | ((value: Type) => Type)): Type;
+    readonly [INTERNAL_SUBSCRIBE]: (callback: (value: Type) => void) => () => void;
+}
 
 const createSignal = <Type>(initialValue: Type | (() => Type)) => {
     let value = typeof initialValue === 'function' ? (initialValue as () => Type)() : initialValue;
-    const obj: Signal<Type> = function (updater?: Type | ((value: Type) => Type)) {
-        if (arguments.length) {
-            const nextValue = typeof updater === 'function' ? (updater as (value: Type) => Type)(value) : updater!;
+    const obj: Signal<Type> = Object.assign(
+        function (updater?: Type | ((value: Type) => Type)) {
+            if (arguments.length) {
+                const nextValue = typeof updater === 'function' ? (updater as (value: Type) => Type)(value) : updater!;
 
-            if (nextValue !== value) {
-                mutate((mark) => {
-                    if (typeof value === 'object' || typeof value === 'function') {
-                        // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-                        // @ts-ignore
-                        mark(value);
-                    }
-
+                if (nextValue !== value) {
                     value = nextValue;
-                    mark(obj, value);
-                });
+                    write(obj);
+                }
+            } else {
+                read(obj);
             }
 
             return value;
-        } else {
-            get(obj);
-
-            return value;
+        },
+        {
+            [INTERNAL_SUBSCRIBE]: (callback: (value: Type) => void) => subscribeTo(obj, () => callback(value))
         }
-    };
+    );
 
     return obj;
 };
 
-const mutableInit = (): { refs: { lastObj: object; cleanup: () => void } } => ({
-    refs: { lastObj: noop, cleanup: noop }
-});
+interface Event<Type = void> {
+    (payload: Type): Type;
+    readonly [INTERNAL_SUBSCRIBE]: (callback: (value: Type) => void) => () => void;
+}
 
-const mutableReducer = ({ refs }: ReturnType<typeof mutableInit>) => ({ refs });
+const createEvent = <Type = void>() => {
+    let value: Type;
+    const obj: Event<Type> = Object.assign(
+        (payload: Type) => {
+            value = payload;
+            write(obj);
 
-const useMutable = <Type extends object>(obj: Type): Type => {
-    const [{ refs }, forceUpdate] = useReducer(mutableReducer, null, mutableInit);
-
-    if (obj !== refs.lastObj) {
-        refs.cleanup();
-        refs.cleanup = subscribe((refs.lastObj = obj), forceUpdate);
-    }
-
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => () => refs.cleanup(), []);
+            return payload;
+        },
+        {
+            [INTERNAL_SUBSCRIBE]: (callback: (value: Type) => void) => subscribeTo(obj, () => callback(value))
+        }
+    );
 
     return obj;
 };
 
-const computedInit = (): { refs: { lastObjs: object[]; cleanups: (() => void)[]; callback: () => void } } => ({
-    refs: { lastObjs: array, cleanups: array, callback: noop }
-});
+const createEffect = (func: () => void | (() => void)) => {
+    let lastObjs: Tagged[] = [];
+    let lastCleanups: (() => void)[] = [];
+    let value: ReturnType<typeof func>;
+    const callback = () => {
+        if (typeof value === 'function') {
+            value();
+        }
 
-const computedReducer = ({ refs }: ReturnType<typeof computedInit>) => ({ refs });
+        const objs: Tagged[] = [];
 
-const useComputed = <Type>(func: (mark: typeof get) => Type) => {
-    const [{ refs }, forceUpdate] = useReducer(computedReducer, 0, computedInit);
-    const objs: object[] = [];
+        value = runWithObjs(func, objs);
 
-    globalObjs = objs;
-
-    const value = func(get);
-
-    globalObjs = null;
-    refs.callback = () => {
-        const objs: object[] = [];
-
-        globalObjs = objs;
-
-        const nextValue = func(get);
-
-        globalObjs = null;
-
-        if (nextValue === value) {
-            if (!shallowEqual(objs, refs.lastObjs)) {
-                const callback = () => refs.callback();
-
-                refs.cleanups.forEach(run);
-                refs.cleanups = (refs.lastObjs = objs).map((obj) => subscribe(obj, callback));
-            }
-        } else {
-            forceUpdate();
+        if (objs.length !== lastObjs.length || objs.some((item, index) => item !== lastObjs[index])) {
+            lastCleanups.forEach(run);
+            lastCleanups = objs.map((obj) => subscribeTo(obj, callback));
+            lastObjs = objs;
         }
     };
 
-    if (!shallowEqual(objs, refs.lastObjs)) {
-        const callback = () => refs.callback();
+    callback();
 
-        refs.cleanups.forEach(run);
-        refs.cleanups = (refs.lastObjs = objs).map((obj) => subscribe(obj, callback));
+    return () => {
+        if (typeof value === 'function') {
+            value();
+        }
+
+        lastCleanups.forEach(run);
+    };
+};
+
+interface Subscribe {
+    <Type>(obj: Signal<Type> | Event<Type> | (() => Type), callback: (value: Type) => void): () => void;
+    <Type extends MutableObject>(obj: Type, callback: (value: Type) => void): () => void;
+}
+
+const subscribe: Subscribe = (obj: any, callback: (value: any) => void) => {
+    if (INTERNAL_SUBSCRIBE in obj) {
+        return obj[INTERNAL_SUBSCRIBE](callback);
     }
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    useEffect(() => () => refs.cleanups.forEach(run), []);
+    if (typeof obj === 'function') {
+        let value: any;
+        const inst = {
+            callback: () => {
+                value = obj();
+                inst.callback = () => {
+                    const nextValue = obj();
 
-    return value;
+                    if (nextValue !== value) {
+                        value = obj();
+                        callback(value);
+                    }
+                };
+            }
+        };
+
+        return createEffect(() => inst.callback());
+    }
+
+    return subscribeTo(obj, () => callback(obj));
 };
 
-export {
-    get,
-    set,
-    Event,
-    Signal,
-    Subscribe,
-    subscribe,
-    runEffect,
-    mutate,
-    createSignal,
-    createEvent,
-    useMutable,
-    useComputed
+const taggedInit = () => ({ inst: {} as { getSnapshot: () => any; snapshot: any } });
+
+const taggedReducer = ({ inst }: ReturnType<typeof taggedInit>) => ({ inst });
+
+interface UseTagged {
+    <Type>(obj: Signal<Type> | (() => Type)): Type;
+    <Type extends MutableObject>(obj: Type): object;
+}
+
+const useTagged: UseTagged = (obj: any): any => {
+    const [{ inst }, forceUpdate] = useReducer(taggedReducer, null, taggedInit);
+    const objs: Tagged[] = [];
+
+    inst.getSnapshot = typeof obj === 'function' ? obj : () => globalVersions.get(mutable(obj)) || obj;
+    inst.snapshot = runWithObjs(inst.getSnapshot, objs);
+
+    useEffect(
+        () =>
+            createEffect(() => {
+                if (inst.getSnapshot() !== inst.snapshot) {
+                    forceUpdate();
+                }
+            }),
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        objs
+    );
+
+    return inst.snapshot;
 };
+
+export { batch, mutable, mutated, Signal, createSignal, Event, createEvent, createEffect, subscribe, useTagged };
