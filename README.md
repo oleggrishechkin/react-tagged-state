@@ -56,7 +56,6 @@ npm install --save react-tagged-state
 - [mutable](#mutable)
 - [mutated](#mutated)
 - [subscribe](#subscribe)
-- [batch](#batch)
 - [useTagged](#usetagged)
 - [createEffect](#createeffect)
 
@@ -203,7 +202,7 @@ interface mutated {
 ```
 
 This is a setter for mutable object.<br>
-You should call it **after** mutable object mutations.<br>
+You should call it when you mutate mutable object.<br>
 
 ```javascript
 import {
@@ -298,45 +297,6 @@ unsubscribe();
 
 ---
 
-### batch
-
-```typescript
-interface batch {
-  <Type>(func: () => Type): Type;
-}
-```
-
-This function collect signal writes, event dispatches and mutable object mutations and call all affected subscribers once.
-
-```javascript
-import {
-  batch,
-  mutated,
-  createSignal,
-  createEvent
-} from 'react-tagged-state';
-
-const counterSignal = createSignal();
-
-const resetEvent = createEvent();
-
-const counterRef = { current: 0 };
-
-/* Batch */
-batch(() => {
-  /* For mutable object */
-  mutated(counterRef).current += 1;
-
-  /* For signal*/
-  counterSignal(1000);
-
-  /* For event */
-  resetEvent();
-});
-```
-
----
-
 ### createEffect
 
 ```typescript
@@ -384,13 +344,15 @@ cleanup();
 ```typescript
 interface UseTagged {
   <Type>(obj: Signal<Type> | (() => Type)): Type;
-  <Type extends MutableObject>(obj: Type): object;
+  <Type extends MutableObject>(obj: Type): MutableObject;
 }
 ```
 
 This hook will re-render Component anytime when `obj` was written or mutated.
 
 With signal:
+
+Hook returns signal value.
 
 ```javascript
 import {
@@ -411,6 +373,8 @@ const Counter = () => {
 
 With mutable object:
 
+Hook returns `obj` version (tt's some empty object or `obj` itself).You can use it in hooks deps. Anytime when `obj` was mutated a new version will be created.
+
 ```javascript
 import { useTagged } from 'react-tagged-state';
 
@@ -428,7 +392,7 @@ const Counter = () => {
 
 With computed:
 
-`obj` will be called immediately and anytime when related signals were written or mutable objects were mutated.<br>
+Hook returns value that `obj` returns.<br>
 This hook will re-render component anytime when value that `obj` returns was changed.<br>
 
 ```javascript
@@ -457,3 +421,7 @@ const UserCard = ({ userId }) => {
 ## Performance
 
 See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html).
+
+## Concurrent Mode
+
+You can safely use this library in Concurrent Mode. It uses `useSyncExternalStore` internally.
