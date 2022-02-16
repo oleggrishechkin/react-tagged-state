@@ -1,5 +1,5 @@
 // @ts-expect-error Module '"react"' has no exported member 'useSyncExternalStore'
-import { useEffect, useLayoutEffect, useSyncExternalStore, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useSyncExternalStore, useRef, useState, DependencyList, useMemo } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 
 type Tagged = MutableObject | Signal<any> | Event<any>;
@@ -66,20 +66,18 @@ const write = <Type extends Tagged>(obj: Type) => {
 
             globalObjsSet = null;
             unstable_batchedUpdates(() => {
-                const calledSubscribers = new Set<() => void>();
+                const batchedSubscribers = new Set<() => void>();
 
                 objsSet.forEach((obj) => {
                     const subscribers = globalSubscribers.get(obj);
 
                     if (subscribers) {
                         subscribers.forEach((subscriber) => {
-                            if (!calledSubscribers.has(subscriber)) {
-                                calledSubscribers.add(subscriber);
-                                subscriber();
-                            }
+                            batchedSubscribers.add(subscriber);
                         });
                     }
                 });
+                batchedSubscribers.forEach(run);
             });
         });
     }
@@ -236,6 +234,27 @@ const subscribe: Subscribe = (obj: any, func: (value: any) => void) => {
     return subscribeTo(obj, () => func(globalVersions.get(obj) || obj));
 };
 
+const getVersion = (obj: Tagged) =>
+    typeof obj === 'function' ? (obj as Signal<any>)() : globalVersions.get(obj) || obj;
+
+const createMemoized = <Type>(func: () => Type) => {
+    let lastObjs: Tagged[] = emptyArray;
+    let lastVersion: any[] = emptyArray;
+    let value: Type;
+
+    return () => {
+        if (!lastObjs.length || lastObjs.some((obj, index) => getVersion(obj) !== lastVersion[index])) {
+            lastObjs = [];
+            value = runWithObjs(func, lastObjs);
+            lastVersion = lastObjs.map(getVersion);
+        }
+
+        lastObjs.forEach(read);
+
+        return value;
+    };
+};
+
 const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
         ? <Type>(subscribe: (callback: () => void) => () => void, getSnapshot: () => Type) => {
@@ -301,4 +320,22 @@ const useTagged: UseTagged = (obj: any): any => {
     });
 };
 
-export { mutable, mutated, Signal, createSignal, Event, createEvent, createEffect, subscribe, useTagged };
+const useTaggedMemoized = <Type>(func: () => Type, deps?: DependencyList) => {
+    const memoizedObj = useMemo(() => createMemoized(func), deps);
+
+    return useTagged(memoizedObj);
+};
+
+export {
+    mutable,
+    mutated,
+    Signal,
+    createSignal,
+    Event,
+    createEvent,
+    createEffect,
+    subscribe,
+    useTagged,
+    createMemoized,
+    useTaggedMemoized
+};
