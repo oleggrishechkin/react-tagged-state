@@ -255,29 +255,43 @@ const createMemoized = <Type>(func: () => Type) => {
     };
 };
 
+const checkIfSnapshotChanged = (inst: { getSnapshot: () => any; value: any }) => {
+    try {
+        return inst.value !== inst.getSnapshot();
+    } catch (error) {
+        return true;
+    }
+};
+
 const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
         ? <Type>(subscribe: (callback: () => void) => () => void, getSnapshot: () => Type) => {
-              const snapshot = getSnapshot();
-              const [{ inst }, forceUpdate] = useState({ inst: { snapshot, getSnapshot } });
+              const value = getSnapshot();
+              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
 
               useLayoutEffect(() => {
+                  inst.value = value;
                   inst.getSnapshot = getSnapshot;
-                  inst.snapshot = snapshot;
-              }, [getSnapshot, inst, snapshot]);
+
+                  if (checkIfSnapshotChanged(inst)) {
+                      forceUpdate({ inst });
+                  }
+                  // eslint-disable-next-line react-hooks/exhaustive-deps
+              }, [subscribe, value, getSnapshot]);
               useEffect(() => {
-                  if (inst.getSnapshot() !== inst.snapshot) {
+                  if (checkIfSnapshotChanged(inst)) {
                       forceUpdate({ inst });
                   }
 
                   return subscribe(() => {
-                      if (inst.getSnapshot() !== inst.snapshot) {
+                      if (checkIfSnapshotChanged(inst)) {
                           forceUpdate({ inst });
                       }
                   });
-              }, [inst, subscribe]);
+                  // eslint-disable-next-line react-hooks/exhaustive-deps
+              }, [subscribe]);
 
-              return snapshot;
+              return value;
           }
         : useSyncExternalStore;
 
