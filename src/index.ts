@@ -65,20 +65,21 @@ const write = <Type extends Tagged>(obj: Type) => {
             const objsSet = globalObjsSet!;
 
             globalObjsSet = null;
-
             unstable_batchedUpdates(() => {
-                const batchedSubscribers = new Set<() => void>();
+                const calledSubscribers = new Set<() => void>();
 
                 objsSet.forEach((obj) => {
                     const subscribers = globalSubscribers.get(obj);
 
                     if (subscribers) {
                         subscribers.forEach((subscriber) => {
-                            batchedSubscribers.add(subscriber);
+                            if (!calledSubscribers.has(subscriber)) {
+                                calledSubscribers.add(subscriber);
+                                subscriber();
+                            }
                         });
                     }
                 });
-                batchedSubscribers.forEach(run);
             });
         });
     }
