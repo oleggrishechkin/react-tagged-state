@@ -49,23 +49,138 @@ npm install --save react-tagged-state
 
 ## API Reference
 
+- [mutable](#mutable)
+- [mutated](#mutated)
+- [getVersion](#getversion)
 - [createSignal](#createsignal)
 - [signal](#signal)
 - [createEvent](#createevent)
 - [event](#event)
-- [mutable](#mutable)
-- [mutated](#mutated)
+- [createComputed](#createcomputed)
+- [computed](#computed)
 - [subscribe](#subscribe)
 - [useTagged](#usetagged)
 - [createEffect](#createeffect)
 
+### mutable
+
+```typescript
+interface mutable {
+  <T extends MutableObject>(mutableObject: T): T;
+}
+```
+
+This is a getter for mutable objects.<br>
+It will add specified mutable object to the deps of [`useTagged`](#usetagged), [`createEffect`](#createeffect) or [`subscribe`](#subscribe).
+
+```javascript
+import {
+  mutable,
+  useTagged
+} from 'react-tagged-state';
+
+const counterRef = { current: 0 };
+
+/* Inside createEffect */
+createEffect(() => {
+  /* Read mutable object */
+  console.log(mutable(counterRef).current);
+});
+
+const Counter = () => {
+  /* Inside useTagged */
+  const counter = useTagged(() => {
+    /* Read mutable object */
+    return mutable(counterRef).current;
+  });
+
+  return <div>{counter}</div>;
+};
+
+/* Inside subscribe */
+subscribe(
+  () => {
+    /* Read mutable object */
+    return mutable(counterRef).current;
+  },
+  (counter) => {
+    console.log(counter);
+  }
+);
+```
+
+---
+
+### mutated
+
+```typescript
+interface mutated {
+  <T extends MutableObject>(mutableObject: T): T;
+}
+```
+
+This is a setter for mutable object.<br>
+It will trigger related [`useTagged`](#usetagged), [`createEffect`](#createeffect) or [`subscribe`](#subscribe) for specified mutable object.
+
+```javascript
+import {
+  mutated,
+  useTagged
+} from 'react-tagged-state';
+
+const counterRef = { current: 0 };
+
+/* Mutate */
+counterRef.current += 1;
+
+/* Write mutable object */
+mutated(counterRef);
+```
+
+---
+
+### getVersion
+
+```typescript
+interface getVersion {
+  <T extends MutableObject>(
+    mutableObject: T
+  ): MutableObject;
+}
+```
+
+This is a getter for mutable object version.<br>
+Version will be changed for mutable object when you call [`mutated`](#mutated) with this mutable object.
+
+```javascript
+import {
+  mutated,
+  getVersion
+} from 'react-tagged-state';
+
+const counterRef = { current: 0 };
+
+/* Get mutable object version */
+const firstVerson = getVersion(counterRef);
+
+/* The same version */
+const secondVersion = getVersion(counterRef);
+
+/* Write mutable object */
+mutated(counterRef);
+
+/* The new version */
+const thirdVersion = getVersion(counterRef);
+```
+
+---
+
 ### createSignal
 
 ```typescript
-interface createSignal {
-  <Type>(
-    initialValue: Type | (() => Type)
-  ): Signal<Type>;
+interface CreateSignal {
+  <T>(value: T): Signal<T>;
+  <T>(selector: () => T): Signal<T>;
 }
 ```
 
@@ -79,7 +194,7 @@ let counterSignal;
 /* Initialize with value */
 counterSignal = createSignal(0);
 
-/* Initialize with function */
+/* Initialize with selector */
 counterSignal = createSignal(() => 0);
 ```
 
@@ -88,14 +203,19 @@ counterSignal = createSignal(() => 0);
 ### signal
 
 ```typescript
-interface Signal<Type> {
-  (): Type;
-  (updater: Type | ((value: Type) => Type)): Type;
+interface Signal<T> {
+  (): T;
+  (value: T): T;
+  (updater: (value: T) => T): T;
+  readonly on: (
+    callback: (value: T) => void
+  ) => () => void;
 }
 ```
 
 This function is a value container.<br>
-Signal will be added to the deps when you read its value inside [useTagged](#usetagged) or [createEffect](#createeffect).
+Reading it will add signal to the deps of [`useTagged`](#usetagged), [`createEffect`](#createeffect) or [`subscribe`](#subscribe).<br>
+Writing it will trigger related [`useTagged`](#usetagged), [`createEffect`](#createeffect) or [`subscribe`](#subscribe).
 
 ```javascript
 import { createSignal } from 'react-tagged-state';
@@ -118,7 +238,7 @@ counterSignal((counter) => counter + 1);
 
 ```typescript
 interface createEvent {
-  <Type = void>(): Event<Type>;
+  <T = void>(): Event<T>;
 }
 ```
 
@@ -136,13 +256,16 @@ const resetEvent = createEvent();
 ### event
 
 ```typescript
-interface Event<Type = void> {
-  (value: Type): Type;
+interface Event<T = void> {
+  (payload: T): T;
+  readonly on: (
+    callback: (value: T) => void
+  ) => () => void;
 }
 ```
 
 This function is an event dispatcher.<br>
-You can use it for write multiple [signals](#signal) and [mutate](#mutate) multiple mutable objects.
+Dispatching it will trigger related [`subscribe`](#subscribe).
 
 ```javascript
 import { createEvent } from 'react-tagged-state';
@@ -155,68 +278,63 @@ resetEvent();
 
 ---
 
-### mutable
+### createComputed
 
 ```typescript
-interface mutable {
-  <Type extends MutableObject>(obj: Type): Type;
+interface createComputed {
+  <T>(selector: () => T): Computed<T>;
 }
 ```
 
-This is a getter for mutable objects.<br>
-`obj` will be added to the deps when you call [`mutable(obj)`](#mutate) inside [useTagged](#usetagged) or [createEffect](#createeffect).
+This is a [computed](#computed) factory.
 
 ```javascript
 import {
-  useTagged,
-  mutable
+  createSignal,
+  createComputed
 } from 'react-tagged-state';
 
-const counterRef = { current: 0 };
+const counterSignal = createSignal(0);
 
-/* Inside createEffect */
-createEffect(() => {
-  /* Mark object as mutable */
-  console.log(mutable(counterRef).current);
-});
-
-const Counter = () => {
-  /* Inside useTagged */
-  const counter = useTagged(() => {
-    /* Mark object as mutable */
-    return mutable(counterRef).current;
-  });
-
-  return <div>{counter}</div>;
-};
+/* Initialize */
+const computed = createComputed(() =>
+  Math.floor(counterSignal() / 10)
+);
 ```
 
 ---
 
-### mutated
+### computed
 
 ```typescript
-interface mutated {
-  <Type extends MutableObject>(obj: Type): Type;
+interface Computed<T = void> {
+  (): T;
+  readonly on: (
+    callback: (value: T) => void
+  ) => () => void;
+  readonly compute: () => void;
+  readonly cleanup: () => void;
 }
 ```
 
-This is a setter for mutable object.<br>
-You should call it when you mutate mutable object.<br>
+This function is a computed value container.<br>
+Reading it will add computed to the deps of [`useTagged`](#usetagged), [`createEffect`](#createeffect) or [`subscribe`](#subscribe).<br>
+Related [`useTagged`](#usetagged), [`createEffect`](#createeffect) or [`subscribe`](#subscribe) will be triggered if computed value was changed.
 
 ```javascript
 import {
-  mutated,
-  useTagged
+  createSignal,
+  createComputed
 } from 'react-tagged-state';
 
-const counterRef = { current: 0 };
+const counterSignal = createSignal(0);
 
-/* Mutate */
-counterRef.current += 1;
+const computed = createComputed(() =>
+  Math.floor(counterSignal() / 10)
+);
 
-/* Mark object as mutated */
-mutated(counterRef);
+/* Read */
+const value = computed();
 ```
 
 ---
@@ -225,32 +343,47 @@ mutated(counterRef);
 
 ```typescript
 interface Subscribe {
-  <Type>(
-    obj:
-      | Signal<Type>
-      | Event<Type>
-      | (() => Type),
-    callback: (value: Type) => void
+  <T extends MutableObject>(
+    mutableObject: T,
+    callback: (version: MutableObject) => void
   ): () => void;
-  <Type extends MutableObject>(
-    obj: Type,
-    callback: (value: Type) => void
+  <T>(
+    signal: Signal<T>,
+    callback: (value: T) => void
+  ): () => void;
+  <T>(
+    event: Event<T>,
+    callback: (value: T) => void
+  ): () => void;
+  <T>(
+    computed: Computed<T>,
+    callback: (value: T) => void
+  ): () => void;
+  <T>(
+    selector: () => T,
+    callback: (value: T) => void
   ): () => void;
 }
 ```
 
-This function subscribe to signal writes, event dispatches or mutable object mutations.<br>
+This function subscribe to mutable object, signal, event, computed or selector<br>
+`callback` will be called anytime when deps were updated.<br>
 
 ```javascript
 import {
   createSignal,
   createEvent,
+  createComputed,
   subscribe
 } from 'react-tagged-state';
 
 const counterSignal = createSignal(0);
 
 const resetEvent = createEvent();
+
+const computed = createComputed(() =>
+  Math.floor(counterSignal() / 10)
+);
 
 const counterRef = { current: 0 };
 
@@ -264,26 +397,22 @@ unsubscribe = subscribe(
   }
 );
 
-/* Unsubscribe */
-unsubscribe();
-
 /* Subscribe to event */
 unsubscribe = subscribe(resetEvent, () => {
   console.log('reset');
 });
 
-/* Unsubscribe */
-unsubscribe();
+/* Subscribe to computed */
+unsubscribe = subscribe(computed, (value) => {
+  console.log(value);
+});
 
 /* Subscribe to mutable object */
 unsubscribe = subscribe(counterRef, () => {
   console.log(counterRef.current);
 });
 
-/* Unsubscribe */
-unsubscribe();
-
-/* Subscribe to computed */
+/* Subscribe to selector */
 unsubscribe = subscribe(
   () => Math.floor(counterSignal() / 10),
   (computed) => {
@@ -300,23 +429,28 @@ unsubscribe();
 ### createEffect
 
 ```typescript
-export interface createEffect {
-  (func: () => void | (() => void)): () => void;
+interface CreateEffect {
+  (func: () => void): () => void;
+  (func: () => () => void): () => void;
 }
 ```
 
-`func` will be called immediately and anytime when related signals were written or mutable objects were mutated.<br>
-This function returns cleanup function.<br>
-You can return cleanup function from `func`. It will be called before next `func` call or cleanup function call.
+`func` will be called immediately and anytime when deps were updated.<br>
+You can return function from `func`. It will be called before next `func` or cleanup call.
 
 ```javascript
 import {
+  mutable,
   createSignal,
-  createEffect,
-  mutable
+  createComputed,
+  createEffect
 } from 'react-tagged-state';
 
 const signal = createSignal(0);
+
+const computed = createComputed(() =>
+  Math.floor(signal() / 10)
+);
 
 const ref = { current: 0 };
 
@@ -324,10 +458,12 @@ const ref = { current: 0 };
 const cleanup = createEffect(() => {
   /* Read singal */
   console.log(signal());
-  /* Mark mutable object */
+  /* Read computed */
+  console.log(computed());
+  /* Read mutable object */
   console.log(mutable(ref).current);
 
-  /* Return cleanup function */
+  /* Will be called before next `func` or cleanup call */
   return () => {
     console.log('cleanup');
   };
@@ -343,12 +479,19 @@ cleanup();
 
 ```typescript
 interface UseTagged {
-  <Type>(obj: Signal<Type> | (() => Type)): Type;
-  <Type extends MutableObject>(obj: Type): MutableObject;
+  <T extends MutableObject>(
+    mutableObject: T
+  ): MutableObject;
+  <T>(signal: Signal<T>): T;
+  <T>(computed: Computed<T>): T;
+  <T>(
+    selector: () => T,
+    deps?: DependencyList
+  ): T;
 }
 ```
 
-This hook will re-render Component anytime when `obj` was written or mutated.
+This hook will re-render Component anytime when deps were updated.
 
 With signal:
 
@@ -371,9 +514,35 @@ const Counter = () => {
 };
 ```
 
+With computed:
+
+Hook returns computed value.
+
+```javascript
+import {
+  createSignal,
+  createComputed,
+  useTagged
+} from 'react-tagged-state';
+
+const counterSignal = createSignal(0);
+
+const computed = createComputed(() =>
+  Math.floor(signal() / 10)
+);
+
+/* Re-render Counter if computed was changed */
+const Counter = () => {
+  /* Bind */
+  const value = useTagged(computed);
+
+  return <div>{value}</div>;
+};
+```
+
 With mutable object:
 
-Hook returns `obj` version (tt's some empty object or `obj` itself).You can use it in hooks deps. Anytime when `obj` was mutated a new version will be created.
+Hook returns mutable object version.
 
 ```javascript
 import { useTagged } from 'react-tagged-state';
@@ -390,10 +559,9 @@ const Counter = () => {
 };
 ```
 
-With computed:
+With selector:
 
-Hook returns value that `obj` returns.<br>
-This hook will re-render component anytime when value that `obj` returns was changed.<br>
+Hook returns selected value.<br>
 
 ```javascript
 import {
@@ -424,4 +592,4 @@ See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework
 
 ## Concurrent Mode
 
-You can safely use this library in Concurrent Mode. It uses `useSyncExternalStore` internally.
+I suppose you can safely use this library in Concurrent Mode because it uses `useSyncExternalStore` under the hood.
