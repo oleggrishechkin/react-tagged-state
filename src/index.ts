@@ -1,5 +1,5 @@
 // @ts-expect-error Module '"react"' has no exported member 'useSyncExternalStore'
-import { useEffect, useLayoutEffect, useSyncExternalStore, useRef, useState, DependencyList, useMemo } from 'react';
+import { useEffect, useLayoutEffect, useSyncExternalStore, useRef, useState } from 'react';
 import { unstable_batchedUpdates } from 'react-dom';
 
 type Tagged = MutableObject | Signal<any> | Event<any>;
@@ -301,6 +301,12 @@ interface UseTagged {
 }
 
 const useTagged: UseTagged = (obj: any): any => {
+    const isFunction = typeof obj === 'function';
+
+    if (isFunction && !(INTERNAL_SUBSCRIBE in obj)) {
+        obj = createMemoized(obj);
+    }
+
     const lastObjsRef = useRef<Tagged[]>(emptyArray);
     const lastCleanupsRef = useRef<(() => void)[]>(emptyArray);
     const callbackRef = useRef(noop);
@@ -316,10 +322,7 @@ const useTagged: UseTagged = (obj: any): any => {
 
     return useSyncExternalStoreShim(subscribeRef.current, () => {
         const objs: Tagged[] = [];
-        const value = runWithObjs(
-            typeof obj === 'function' ? obj : () => globalVersions.get(mutable(obj)) || obj,
-            objs
-        );
+        const value = runWithObjs(isFunction ? obj : () => globalVersions.get(mutable(obj)) || obj, objs);
 
         if (callbackRef.current !== noop && shallowNotEqual(objs, lastObjsRef.current)) {
             const callback = () => callbackRef.current();
@@ -334,12 +337,6 @@ const useTagged: UseTagged = (obj: any): any => {
     });
 };
 
-const useTaggedMemoized = <Type>(func: () => Type, deps?: DependencyList) => {
-    const memoizedObj = useMemo(() => createMemoized(func), deps);
-
-    return useTagged(memoizedObj);
-};
-
 export {
     mutable,
     mutated,
@@ -350,6 +347,5 @@ export {
     createEffect,
     subscribe,
     useTagged,
-    createMemoized,
-    useTaggedMemoized
+    createMemoized
 };
