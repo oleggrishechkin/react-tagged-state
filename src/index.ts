@@ -1,142 +1,117 @@
-// @ts-expect-error Module '"react"' has no exported member 'useSyncExternalStore'
-import { useEffect, useLayoutEffect, useSyncExternalStore, useState, DependencyList, useMemo } from 'react';
-import { unstable_batchedUpdates } from 'react-dom';
+// eslint-disable-next-line @typescript-eslint/ban-ts-comment
+// @ts-ignore
+import { useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
 
-type MutableObject = Record<any, any> | any[] | Set<any> | Map<any, any> | WeakSet<any> | WeakMap<any, any>;
+interface Sub {
+    __callback: () => void;
+    readonly __objs: Set<Signal<any> | Computed<any>>;
+}
 
 interface Signal<T> {
     (): T;
     (value: T): T;
     (updater: (value: T) => T): T;
+    value: T;
+    readonly __subs: Set<Sub>;
     readonly on: (callback: (value: T) => void) => () => void;
 }
 
 interface Event<T = void> {
     (payload: T): T;
-    readonly on: (callback: (value: T) => void) => () => void;
+    readonly __callbacks: Set<(payload: T) => void>;
+    readonly on: (callback: (payload: T) => void) => () => void;
 }
 
-interface Computed<T = void> {
+interface Computed<T> {
     (): T;
+    value: T | void;
+    __sub: Sub | null;
+    readonly __subs: Set<Sub>;
     readonly on: (callback: (value: T) => void) => () => void;
-    readonly compute: () => void;
-    readonly cleanup: () => void;
 }
 
-type Tagged = MutableObject | Signal<any> | Event<any> | Computed<any>;
+let globalSub: Sub | null = null;
 
-const run = <T>(func: () => T) => func();
+let globalObjs: Set<Signal<any> | Computed<any>> | null = null;
 
-const globalSubscribers = new WeakMap<Tagged, Set<() => void>>();
+const scheduleUpdates = (obj: Signal<any> | Computed<any>) => {
+    if (globalObjs) {
+        globalObjs.add(obj);
 
-const globalVersions = new WeakMap<Tagged, MutableObject>();
+        return;
+    }
 
-let globalObjs: Tagged[] | null = null;
+    globalObjs = new Set([obj]);
+    Promise.resolve().then(() => {
+        const objs = globalObjs as Set<Signal<any> | Computed<any>>;
 
-let globalObjsSet: Set<Tagged> | null = null;
+        globalObjs = null;
 
-const runWithObjs = <T>(func: () => T, objs: typeof globalObjs) => {
-    const tmp = globalObjs;
+        // We need to collect all subs to calling each of them once
+        const batchedSubs = new Set<Sub>();
 
-    globalObjs = objs;
+        objs.forEach((obj) =>
+            obj.__subs.forEach((sub) => {
+                batchedSubs.add(sub);
+            })
+        );
+        batchedSubs.forEach((sub) => sub.__callback());
+    });
+};
+
+const createSub = (callback: () => void): Sub => ({
+    __callback: callback,
+    __objs: new Set()
+});
+
+const subUnsubscribe = (sub: Sub) =>
+    sub.__objs.forEach((obj) => {
+        obj.__subs.delete(sub);
+
+        if (obj.__subs.size) {
+            return;
+        }
+
+        // If computed has no subs we need to unsubscribe computed sub
+        if ('__sub' in obj && obj.__sub) {
+            subUnsubscribe(obj.__sub);
+            obj.__sub = null;
+        }
+    });
+
+const subAutoSubscribe = <T>(func: () => T, sub: Sub) => {
+    const prevObjs = Array.from(sub.__objs);
+
+    sub.__objs.clear();
+
+    const prevGlobalSub = globalSub;
+
+    globalSub = sub;
 
     const value = func();
 
-    globalObjs = tmp;
+    globalSub = prevGlobalSub;
+    // If prev obj has not in next objs we need to unsubscribe from it
+    prevObjs.forEach((obj) => {
+        if (sub.__objs.has(obj)) {
+            return;
+        }
+
+        obj.__subs.delete(sub);
+
+        if (obj.__subs.size) {
+            return;
+        }
+
+        // If computed has no subs we need to unsubscribe computed sub
+        if ('__sub' in obj && obj.__sub) {
+            subUnsubscribe(obj.__sub);
+            obj.__sub = null;
+        }
+    });
 
     return value;
 };
-
-const subscribeToObj = (obj: Tagged, callback: () => void) => {
-    let subscribers = globalSubscribers.get(obj);
-
-    if (subscribers) {
-        subscribers.add(callback);
-    } else {
-        subscribers = new Set([callback]);
-        globalSubscribers.set(obj, subscribers);
-
-        if ('compute' in obj) {
-            obj.compute();
-        }
-    }
-
-    return () => {
-        if (subscribers!.size === 1) {
-            globalSubscribers.delete(obj);
-
-            if (typeof obj === 'object') {
-                globalVersions.delete(obj);
-
-                return;
-            }
-
-            if ('cleanup' in obj) {
-                obj.cleanup();
-            }
-
-            return;
-        }
-
-        subscribers!.delete(callback);
-    };
-};
-
-const read = (obj: Tagged) => {
-    if (globalObjs) {
-        globalObjs.push(obj);
-    }
-};
-
-const write = (obj: Tagged) => {
-    if (globalSubscribers.has(obj)) {
-        if (globalObjsSet) {
-            globalObjsSet.add(obj);
-
-            return;
-        }
-
-        globalObjsSet = new Set([obj]);
-        Promise.resolve().then(() => {
-            const objsSet = globalObjsSet!;
-
-            globalObjsSet = null;
-            unstable_batchedUpdates(() => {
-                const batchedSubscribers = new Set<() => void>();
-
-                objsSet.forEach((obj) => {
-                    const subscribers = globalSubscribers.get(obj);
-
-                    if (subscribers) {
-                        subscribers.forEach((subscriber) => {
-                            batchedSubscribers.add(subscriber);
-                        });
-                    }
-                });
-                batchedSubscribers.forEach(run);
-            });
-        });
-    }
-};
-
-const mutable = <T extends MutableObject>(mutableObject: T): T => {
-    read(mutableObject);
-
-    return mutableObject;
-};
-
-const mutated = <T extends MutableObject>(mutableObject: T): T => {
-    if (globalSubscribers.get(mutableObject)) {
-        globalVersions.set(mutableObject, {});
-    }
-
-    write(mutableObject);
-
-    return mutableObject;
-};
-
-const getVersion = <T extends MutableObject>(mutableObject: T): MutableObject =>
-    globalVersions.get(mutableObject) || mutableObject;
 
 interface CreateSignal {
     <T>(value: T): Signal<T>;
@@ -144,24 +119,38 @@ interface CreateSignal {
 }
 
 const createSignal: CreateSignal = <T>(initializer: T | (() => T)) => {
-    let value = typeof initializer === 'function' ? (initializer as () => T)() : initializer;
     const signal: Signal<T> = Object.assign(
         (...args: any[]) => {
             if (args.length) {
-                const nextValue = typeof args[0] === 'function' ? args[0](value) : args[0];
+                const nextValue = typeof args[0] === 'function' ? args[0](signal.value) : args[0];
 
-                if (nextValue !== value) {
-                    value = nextValue;
-                    write(signal);
+                if (nextValue !== signal.value) {
+                    signal.value = nextValue;
+                    scheduleUpdates(signal);
                 }
-            } else {
-                read(signal);
+
+                return signal.value;
             }
 
-            return value;
+            if (globalSub) {
+                signal.__subs.add(globalSub);
+                globalSub.__objs.add(signal);
+            }
+
+            return signal.value;
         },
         {
-            on: (callback: (value: T) => void) => subscribeToObj(signal, () => callback(value))
+            value: typeof initializer === 'function' ? (initializer as () => T)() : initializer,
+            __subs: new Set<Sub>(),
+            on: (callback: (value: T) => void): (() => void) => {
+                const sub = createSub(() => callback(signal.value));
+
+                signal.__subs.add(sub);
+
+                return () => {
+                    signal.__subs.delete(sub);
+                };
+            }
         }
     );
 
@@ -169,76 +158,68 @@ const createSignal: CreateSignal = <T>(initializer: T | (() => T)) => {
 };
 
 const createEvent = <T = void>(): Event<T> => {
-    let value: T;
     const event: Event<T> = Object.assign(
         (payload: T) => {
-            value = payload;
-            write(event);
+            event.__callbacks.forEach((callback) => callback(payload));
 
             return payload;
         },
         {
-            on: (callback: (value: T) => void) => subscribeToObj(event, () => callback(value))
+            __callbacks: new Set<(payload: T) => void>(),
+            on: (callback: (payload: T) => void) => {
+                event.__callbacks.add(callback);
+
+                return () => {
+                    event.__callbacks.delete(callback);
+                };
+            }
         }
     );
 
     return event;
 };
 
-const shallowNotEqual = <T extends any[]>(prev: T, next: T) =>
-    next.length !== prev.length || next.some((item, index) => item !== prev[index]);
-
 const createComputed = <T>(selector: () => T): Computed<T> => {
-    let lastObjs: Tagged[] = [];
-    let lastCleanups: (() => void)[] = [];
-    let value: T | void;
     const computed: Computed<T> = Object.assign(
         () => {
-            computed.compute();
-            read(computed);
+            if (globalSub) {
+                computed.__subs.add(globalSub);
+                globalSub.__objs.add(computed);
 
-            return value as T;
+                if (computed.__sub) {
+                    return computed.value as T;
+                }
+
+                // If computed not subscribed yet we need to subscribe it
+                computed.__sub = createSub(() => {
+                    const nextValue = subAutoSubscribe(selector, computed.__sub as Sub);
+
+                    if (nextValue !== computed.value) {
+                        computed.value = nextValue;
+                        scheduleUpdates(computed);
+                    }
+                });
+                computed.value = subAutoSubscribe(selector, computed.__sub);
+
+                return computed.value;
+            }
+
+            if (computed.__sub) {
+                return computed.value as T;
+            }
+
+            return selector();
         },
         {
-            on: (callback: (value: T) => void) => subscribeToObj(computed, () => callback(value as T)),
-            compute: () => {
-                if (lastCleanups.length) {
-                    return;
-                }
+            value: void 0,
+            __sub: null,
+            __subs: new Set<Sub>(),
+            on: (callback: (value: T) => void): (() => void) => {
+                const sub = createSub(() => callback(subAutoSubscribe(computed, sub)));
 
-                value = runWithObjs(selector, lastObjs);
+                subAutoSubscribe(computed, sub);
 
-                const callback = () => {
-                    if (globalSubscribers.has(computed)) {
-                        const objs: Tagged[] = [];
-                        const nextValue = runWithObjs(selector, objs);
-
-                        if (shallowNotEqual(lastObjs, objs)) {
-                            lastObjs = objs;
-                            lastCleanups.forEach(run);
-                            lastCleanups = lastObjs.map((obj) => subscribeToObj(obj, callback));
-                        }
-
-                        if (nextValue !== value) {
-                            value = nextValue;
-                            write(computed);
-                        }
-
-                        return;
-                    }
-
-                    computed.cleanup();
-                };
-
-                lastCleanups = lastObjs.map((obj) => subscribeToObj(obj, callback));
-            },
-            cleanup: () => {
-                if (lastCleanups.length) {
-                    lastObjs = [];
-                    lastCleanups.forEach(run);
-                    lastCleanups = [];
-                    value = void 0;
-                }
+                return () => subUnsubscribe(sub);
             }
         }
     );
@@ -252,131 +233,86 @@ interface CreateEffect {
 }
 
 const createEffect: CreateEffect = (func: () => void | (() => void)) => {
-    let lastObjs: Tagged[] = [];
-    let lastCleanups: (() => void)[] = [];
-    let value = runWithObjs(func, lastObjs);
-    const callback = () => {
+    let value: void | (() => void);
+    const sub = createSub(() => {
         if (typeof value === 'function') {
             value();
         }
 
-        const objs: Tagged[] = [];
+        value = subAutoSubscribe(func, sub);
+    });
 
-        value = runWithObjs(func, objs);
-
-        if (shallowNotEqual(lastObjs, objs)) {
-            lastObjs = objs;
-            lastCleanups.forEach(run);
-            lastCleanups = lastObjs.map((obj) => subscribeToObj(obj, callback));
-        }
-    };
-
-    lastCleanups = lastObjs.map((obj) => subscribeToObj(obj, callback));
+    value = subAutoSubscribe(func, sub);
 
     return () => {
         if (typeof value === 'function') {
             value();
         }
 
-        lastCleanups.forEach(run);
+        subUnsubscribe(sub);
     };
 };
 
-interface Subscribe {
-    <T extends MutableObject>(mutableObject: T, callback: (version: MutableObject) => void): () => void;
-    <T>(signal: Signal<T>, callback: (value: T) => void): () => void;
-    <T>(event: Event<T>, callback: (value: T) => void): () => void;
-    <T>(computed: Computed<T>, callback: (value: T) => void): () => void;
-    <T>(selector: () => T, callback: (value: T) => void): () => void;
-}
+const init = () => ({ inst: {} as { getSnapshot: () => any; value: any } });
 
-const subscribe: Subscribe = (obj: Tagged | (() => any), callback: (value: any) => void) => {
-    if (typeof obj === 'object') {
-        return subscribeToObj(obj, () => callback(getVersion(obj)));
-    }
-
-    if ('on' in obj) {
-        return obj.on(callback);
-    }
-
-    return createComputed(obj).on(callback);
-};
-
-const checkIfSnapshotChanged = <T>(inst: { getSnapshot: () => T; value: T }) => {
-    try {
-        return inst.value !== inst.getSnapshot();
-    } catch (error) {
-        return true;
-    }
-};
+const reducer = ({ inst }: ReturnType<typeof init>) => ({ inst });
 
 const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
         ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T) => {
-              const value = getSnapshot();
-              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
+              const [{ inst }, forceUpdate] = useReducer(reducer, null, init);
 
-              useLayoutEffect(() => {
-                  inst.value = value;
-                  inst.getSnapshot = getSnapshot;
+              inst.getSnapshot = getSnapshot;
+              inst.value = inst.getSnapshot();
 
-                  if (checkIfSnapshotChanged(inst)) {
-                      forceUpdate({ inst });
-                  }
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [subscribe, value, getSnapshot]);
               useEffect(() => {
-                  if (checkIfSnapshotChanged(inst)) {
-                      forceUpdate({ inst });
+                  if (inst.getSnapshot() !== inst.value) {
+                      forceUpdate();
                   }
 
-                  return subscribe(() => {
-                      if (checkIfSnapshotChanged(inst)) {
-                          forceUpdate({ inst });
-                      }
-                  });
+                  return subscribe(forceUpdate);
                   // eslint-disable-next-line react-hooks/exhaustive-deps
               }, [subscribe]);
 
-              return value;
+              return inst.value;
           }
         : useSyncExternalStore;
 
 interface UseTagged {
-    <T extends MutableObject>(mutableObject: T): MutableObject;
     <T>(signal: Signal<T>): T;
     <T>(computed: Computed<T>): T;
-    <T>(selector: () => T, deps?: DependencyList): T;
+    <T>(selector: () => T): T;
 }
 
-const useTagged: UseTagged = (obj: MutableObject | Signal<any> | Computed<any> | (() => any), deps?: DependencyList) =>
-    useSyncExternalStoreShim(
-        ...useMemo(() => {
-            if (typeof obj === 'object') {
-                return [(func: () => void) => subscribeToObj(obj, func), () => getVersion(obj)];
-            }
+const useTagged: UseTagged = <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
+    const { sub, handleChangeRef, subscribe } = useMemo(() => {
+        const sub = createSub(() => {});
+        const handleChangeRef = { current: () => {} };
+        // We can't subscribe inside this function because it will be called in effect (but need to be called sync)
+        // We only set handleChangeRef (it's something like forceUpdate) inside this function instead
+        const subscribe = (func: () => void) => {
+            handleChangeRef.current = func;
 
-            if ('on' in obj) {
-                return [(func: () => void) => obj.on(func), obj];
-            }
+            return () => subUnsubscribe(sub);
+        };
 
-            const computed = createComputed(obj);
+        return { sub, handleChangeRef, subscribe };
+    }, []);
 
-            return [(func: () => void) => computed.on(func), computed];
-        }, deps || [obj])
-    );
+    let value = subAutoSubscribe(obj, sub);
 
-export {
-    Signal,
-    Event,
-    Computed,
-    mutable,
-    mutated,
-    getVersion,
-    createSignal,
-    createEvent,
-    createComputed,
-    createEffect,
-    subscribe,
-    useTagged
+    // We need to set sub callback because value and obj can be different during component re-render
+    sub.__callback = () => {
+        const nextValue = subAutoSubscribe(obj, sub);
+
+        if (nextValue !== value) {
+            value = nextValue;
+            handleChangeRef.current();
+        }
+    };
+
+    // We just return value from closure inside getSnapshot because we are already subscribed
+    return useSyncExternalStoreShim(subscribe, () => value);
 };
+
+export { Signal, Event, Computed, createSignal, createEvent, createComputed, createEffect, useTagged };
