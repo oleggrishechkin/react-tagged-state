@@ -1,6 +1,6 @@
 // eslint-disable-next-line @typescript-eslint/ban-ts-comment
 // @ts-ignore
-import { useEffect, useMemo, useReducer, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 interface Sub {
     __callback: () => void;
@@ -25,7 +25,7 @@ interface Event<T = void> {
 interface Computed<T> {
     (): T;
     value: T | void;
-    __sub: Sub | null;
+    __sub: Sub;
     readonly __subs: Set<Sub>;
     readonly on: (callback: (value: T) => void) => () => void;
 }
@@ -34,7 +34,7 @@ let globalSub: Sub | null = null;
 
 let globalObjs: Set<Signal<any> | Computed<any>> | null = null;
 
-const scheduleUpdates = (obj: Signal<any> | Computed<any>) => {
+const scheduleNotify = (obj: Signal<any> | Computed<any>) => {
     if (globalObjs) {
         globalObjs.add(obj);
 
@@ -64,7 +64,7 @@ const createSub = (callback: () => void): Sub => ({
     __objs: new Set()
 });
 
-const subUnsubscribe = (sub: Sub) =>
+const unsubscribe = (sub: Sub) => {
     sub.__objs.forEach((obj) => {
         obj.__subs.delete(sub);
 
@@ -73,13 +73,14 @@ const subUnsubscribe = (sub: Sub) =>
         }
 
         // If computed has no subs we need to unsubscribe computed sub
-        if ('__sub' in obj && obj.__sub) {
-            subUnsubscribe(obj.__sub);
-            obj.__sub = null;
+        if ('__sub' in obj) {
+            unsubscribe(obj.__sub);
         }
     });
+    sub.__objs.clear();
+};
 
-const subAutoSubscribe = <T>(func: () => T, sub: Sub) => {
+const autoSubscribe = <T>(func: () => T, sub: Sub) => {
     const prevObjs = Array.from(sub.__objs);
 
     sub.__objs.clear();
@@ -104,9 +105,8 @@ const subAutoSubscribe = <T>(func: () => T, sub: Sub) => {
         }
 
         // If computed has no subs we need to unsubscribe computed sub
-        if ('__sub' in obj && obj.__sub) {
-            subUnsubscribe(obj.__sub);
-            obj.__sub = null;
+        if ('__sub' in obj) {
+            unsubscribe(obj.__sub);
         }
     });
 
@@ -126,7 +126,10 @@ const createSignal: CreateSignal = <T>(initializer: T | (() => T)) => {
 
                 if (nextValue !== signal.value) {
                     signal.value = nextValue;
-                    scheduleUpdates(signal);
+
+                    if (signal.__subs.size) {
+                        scheduleNotify(signal);
+                    }
                 }
 
                 return signal.value;
@@ -143,13 +146,11 @@ const createSignal: CreateSignal = <T>(initializer: T | (() => T)) => {
             value: typeof initializer === 'function' ? (initializer as () => T)() : initializer,
             __subs: new Set<Sub>(),
             on: (callback: (value: T) => void): (() => void) => {
-                const sub = createSub(() => callback(signal.value));
+                const sub = createSub(() => callback(autoSubscribe(signal, sub)));
 
-                signal.__subs.add(sub);
+                autoSubscribe(signal, sub);
 
-                return () => {
-                    signal.__subs.delete(sub);
-                };
+                return () => unsubscribe(sub);
             }
         }
     );
@@ -186,25 +187,17 @@ const createComputed = <T>(selector: () => T): Computed<T> => {
                 computed.__subs.add(globalSub);
                 globalSub.__objs.add(computed);
 
-                if (computed.__sub) {
+                if (computed.__sub.__objs.size) {
                     return computed.value as T;
                 }
 
                 // If computed not subscribed yet we need to subscribe it
-                computed.__sub = createSub(() => {
-                    const nextValue = subAutoSubscribe(selector, computed.__sub as Sub);
-
-                    if (nextValue !== computed.value) {
-                        computed.value = nextValue;
-                        scheduleUpdates(computed);
-                    }
-                });
-                computed.value = subAutoSubscribe(selector, computed.__sub);
+                computed.value = autoSubscribe(selector, computed.__sub);
 
                 return computed.value;
             }
 
-            if (computed.__sub) {
+            if (computed.__sub.__objs.size) {
                 return computed.value as T;
             }
 
@@ -212,14 +205,24 @@ const createComputed = <T>(selector: () => T): Computed<T> => {
         },
         {
             value: void 0,
-            __sub: null,
+            __sub: createSub(() => {
+                const nextValue = autoSubscribe(selector, computed.__sub);
+
+                if (nextValue !== computed.value) {
+                    computed.value = nextValue;
+
+                    if (computed.__subs.size) {
+                        scheduleNotify(computed);
+                    }
+                }
+            }),
             __subs: new Set<Sub>(),
             on: (callback: (value: T) => void): (() => void) => {
-                const sub = createSub(() => callback(subAutoSubscribe(computed, sub)));
+                const sub = createSub(() => callback(autoSubscribe(computed, sub)));
 
-                subAutoSubscribe(computed, sub);
+                autoSubscribe(computed, sub);
 
-                return () => subUnsubscribe(sub);
+                return () => unsubscribe(sub);
             }
         }
     );
@@ -239,44 +242,19 @@ const createEffect: CreateEffect = (func: () => void | (() => void)) => {
             value();
         }
 
-        value = subAutoSubscribe(func, sub);
+        value = autoSubscribe(func, sub);
     });
 
-    value = subAutoSubscribe(func, sub);
+    value = autoSubscribe(func, sub);
 
     return () => {
         if (typeof value === 'function') {
             value();
         }
 
-        subUnsubscribe(sub);
+        unsubscribe(sub);
     };
 };
-
-const init = () => ({ inst: {} as { getSnapshot: () => any; value: any } });
-
-const reducer = ({ inst }: ReturnType<typeof init>) => ({ inst });
-
-const useSyncExternalStoreShim =
-    typeof useSyncExternalStore === 'undefined'
-        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T) => {
-              const [{ inst }, forceUpdate] = useReducer(reducer, null, init);
-
-              inst.getSnapshot = getSnapshot;
-              inst.value = inst.getSnapshot();
-
-              useEffect(() => {
-                  if (inst.getSnapshot() !== inst.value) {
-                      forceUpdate();
-                  }
-
-                  return subscribe(forceUpdate);
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [subscribe]);
-
-              return inst.value;
-          }
-        : useSyncExternalStore;
 
 interface UseTagged {
     <T>(signal: Signal<T>): T;
@@ -284,35 +262,53 @@ interface UseTagged {
     <T>(selector: () => T): T;
 }
 
-const useTagged: UseTagged = <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
-    const { sub, handleChangeRef, subscribe } = useMemo(() => {
-        const sub = createSub(() => {});
-        const handleChangeRef = { current: () => {} };
-        // We can't subscribe inside this function because it will be called in effect (but need to be called sync)
-        // We only set handleChangeRef (it's something like forceUpdate) inside this function instead
-        const subscribe = (func: () => void) => {
-            handleChangeRef.current = func;
+const useTagged: UseTagged =
+    typeof useSyncExternalStore === 'undefined'
+        ? <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
+              const [{ sub }, forceUpdate] = useState(() => ({ sub: createSub(() => {}) }));
 
-            return () => subUnsubscribe(sub);
-        };
+              let value = autoSubscribe(obj, sub);
 
-        return { sub, handleChangeRef, subscribe };
-    }, []);
+              // We need to set sub callback because value and obj can be different during component re-render
+              sub.__callback = () => {
+                  const nextValue = autoSubscribe(obj, sub);
 
-    let value = subAutoSubscribe(obj, sub);
+                  if (nextValue !== value) {
+                      value = nextValue;
+                      forceUpdate({ sub });
+                  }
+              };
 
-    // We need to set sub callback because value and obj can be different during component re-render
-    sub.__callback = () => {
-        const nextValue = subAutoSubscribe(obj, sub);
+              // eslint-disable-next-line react-hooks/exhaustive-deps
+              useEffect(() => () => unsubscribe(sub), []);
 
-        if (nextValue !== value) {
-            value = nextValue;
-            handleChangeRef.current();
-        }
-    };
+              return value;
+          }
+        : <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
+              const { sub, handleChangeRef, subscribe } = useMemo(() => {
+                  const sub = createSub(() => {});
+                  const handleChangeRef = { current: () => {} };
+                  // We can't subscribe inside this function because it will be called in effect (but need to be called sync)
+                  // We only set handleChangeRef (it's something like forceUpdate) inside this function instead
+                  const subscribe = (func: () => void) => {
+                      handleChangeRef.current = func;
 
-    // We just return value from closure inside getSnapshot because we are already subscribed
-    return useSyncExternalStoreShim(subscribe, () => value);
-};
+                      return () => unsubscribe(sub);
+                  };
+
+                  return { sub, handleChangeRef, subscribe };
+              }, []);
+
+              let value = autoSubscribe(obj, sub);
+
+              // We need to set sub callback because value and obj can be different during component re-render
+              sub.__callback = () => {
+                  value = autoSubscribe(obj, sub);
+                  handleChangeRef.current();
+              };
+
+              // We just return value from closure inside getSnapshot because we are already subscribed
+              return useSyncExternalStore(subscribe, () => value);
+          };
 
 export { Signal, Event, Computed, createSignal, createEvent, createComputed, createEffect, useTagged };
