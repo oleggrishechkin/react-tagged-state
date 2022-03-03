@@ -9,7 +9,7 @@
 
 WIP
 
-⚛️ Experimental reactive and atomic state manager for React.
+⚛️ Experimental reactive and atomic state manager for _React_.
 
 Inspired by awesome [_solid-js_](https://www.solidjs.com/) and [_S.js_](https://github.com/adamhaile/S).
 
@@ -42,19 +42,19 @@ const Counter = () => {
 
 ### Installation
 
-First you need to install `react-tagged-state`.
+First you need to install _react-tagged-state_.
 
 ```shell script
 npm install --save react-tagged-state
 ```
 
 Now you can import anything you want from it.<br>
-Let's create a signal.
 
 ### Creating a signal
 
+The base part of _react-tagged-state_ is a signal. It's a simple value container (atom/state). Keep signals as small as possible. Signal is just a function for value read and write.
+
 For creating a signal you should call [`createSignal`](#createsignal) with initial value.<br>
-Signal is just a function.
 
 ```typescript
 import { createSignal } from 'react-tagged-state';
@@ -63,43 +63,47 @@ import { createSignal } from 'react-tagged-state';
 const counter = createSignal(0);
 ```
 
-Signal was created. Now you can use it.
+### Using a signal
 
-### Read a signal value
-
-For reading a signal value you should call signal without arguments.
+For read a signal value you should call signal without arguments.
 
 ```typescript
 import { createSignal } from 'react-tagged-state';
 
-// Create
 const counter = createSignal(0);
 
 // Read
 counter(); // 0
 ```
 
-### Write a signal value
-
-For writing a signal value you should call signal with value argument.
+For write a signal value you should call signal with value argument.
 
 ```typescript
 import { createSignal } from 'react-tagged-state';
 
-// Create
 const counter = createSignal(0);
 
-// Read
 counter(); // 0
 
 // Write
 counter(1);
 
-// Read
 counter(); // 1
 ```
 
-### Use signal in a component
+You can subscribe to signal writes.<br>
+Sync signal value with storages, log updates or integrate _redux-devtools_ - it's just a simple subscription.
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+// Subscribe
+counter.on((count) => console.log(count));
+```
+
+### Using a signal in a component
 
 You can bind your component with signal with [`useTagged`](#usetagged).<br>
 Component will be re-rendered when you write a signal value.
@@ -110,7 +114,6 @@ import {
   useTagged
 } from 'react-tagged-state';
 
-// Create
 const counter = createSignal(0);
 
 const Counter = () => {
@@ -121,46 +124,6 @@ const Counter = () => {
 };
 ```
 
-## Advanced
-
-### Initialize a signal with function
-
-You can initialize a signal with function.<br>
-
-```typescript
-import { createSignal } from 'react-tagged-state';
-
-// Create
-const counter = createSignal(() => 0);
-```
-
-If you want to use a function as a signal value you should use this API:
-
-```typescript
-import { createSignal } from 'react-tagged-state';
-
-const someFunction = () => {};
-
-// Create
-const counter = createSignal(() => someFunction);
-```
-
-### Write a signal value with function
-
-You can write a signal value with function.<br>
-
-```typescript
-import { createSignal } from 'react-tagged-state';
-
-// Create
-const counter = createSignal(0);
-
-// Write
-counter((count) => count + 1);
-```
-
-### Use selector in a component
-
 You can use selector inside [`useTagged`](#usetagged).<br>
 Component will be re-rendered when selected value was changed.
 
@@ -170,7 +133,6 @@ import {
   useTagged
 } from 'react-tagged-state';
 
-// Create
 const counter = createSignal(0);
 
 const Counter = () => {
@@ -183,7 +145,7 @@ const Counter = () => {
 };
 ```
 
-You can use props inside selector:
+Also, you can use props inside selector:
 
 ```javascript
 import {
@@ -191,7 +153,6 @@ import {
   useTagged
 } from 'react-tagged-state';
 
-// Create
 const users = createSignal({
   id1: { id: 'id1', fullName: 'Adam Sandler' },
   id2: { id: 'id2', fullName: 'Oleg Grishechkin' }
@@ -208,25 +169,147 @@ const UserCard = ({ userId }) => {
 };
 ```
 
-### Read a signal value without adding to the deps
+### Creating an event
 
-Sometimes you want to read a signal value inside [`useTagged`](#usetagged), [`createComputed`](#createcomputed) or [`createEffect`](#createeffect) without adding signal to the deps.<br>
-In this case you can directly read a signal `value` prop.
+Event is just a function too. It's an event dispatcher.<br>
+Events can help you with signal encapsulation. It's like an actions in _redux_.
+
+For creating an event you should call [`createEvent`](#createevent).
 
 ```typescript
-import { createSignal } from 'react-tagged-state';
+import { createEvent } from 'react-tagged-state';
+
+// Create
+const resetEvent = createEvent();
+
+// Subscribe
+resetEvent.on(() => console.log('reset'));
+```
+
+### Using an event
+
+With events, you can do this:
+
+```typescript
+// signals/counter.ts
+
+import { resetEvent } from '../events/resetEvent';
 
 // Create
 const counter = createSignal(0);
 
-// Read
-console.log(counter.value); // 0
+// Subscribe
+resetEvent.on(() => counter(0));
 
-// Write
-counter(1);
+export { counter };
+```
+
+```typescript
+// signals/users.ts
+
+import { resetEvent } from '../events/resetEvent';
+
+// Create
+const users = createSignal({});
+
+// Subscribe
+resetEvent.on(() => users({}));
+
+export { users };
+```
+
+instead of this:
+
+```typescript
+import { counter } from '../signals/counter';
+import { users } from '../signals/users';
+
+const reset = () => {
+  counter(0);
+  users({});
+};
+```
+
+## Advanced
+
+### Creating a computed
+
+For creating a computed you should call [`createComputed`](#createcomputed) with selector.<br>
+
+```typescript
+import {
+  createSignal,
+  createComputed
+} from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+// Creating
+const roundedCounter = createComputed(() =>
+  Math.floor(counter() / 10)
+);
+```
+
+### Using a computed
+
+For reading a computed value you should call computed without arguments.
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+const counter = createSignal(20);
+
+const roundedCounter = createComputed(() =>
+  Math.floor(counter() / 10)
+);
 
 // Read
-console.log(counter.value); // 1
+roundedCounter(); // 2
+```
+
+You can't write a computed value. Anytime when you write a related signal value a computed value will be recomputed.
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+const counter = createSignal(20);
+
+const roundedCounter = createComputed(() =>
+  Math.floor(counter() / 10)
+);
+
+roundedCounter(); // 2
+
+// Write a related signal
+counter(40);
+
+roundedCounter(); // 4
+```
+
+You can use computed in [`useTagged`](#usetagged) as well as signal.
+
+### Initialize a signal with function
+
+You can initialize a signal with function.<br>
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+// Create with function
+const counter = createSignal(() => 0);
+```
+
+### Write a signal value with function
+
+You can write a signal value with function.<br>
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+// Write with function
+counter((count) => count + 1);
 ```
 
 ## API Reference
@@ -529,7 +612,3 @@ const UserCard = ({ userId }) => {
 
 It's written to be fast. Batch all updates. Notify exactly affected subscribers. Re-render only if needed.<br>
 See results in [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html).
-
-## Concurrent Mode
-
-You can safely use it in concurrent mode (`useSyncExternalStore` is used under the hood).

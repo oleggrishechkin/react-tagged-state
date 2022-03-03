@@ -285,18 +285,18 @@ const useTagged: UseTagged =
               return value;
           }
         : <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
-              const { sub, handleChangeRef, subscribe } = useMemo(() => {
+              const { sub, handleChangeRef, syncExternalStoreSubscribe } = useMemo(() => {
                   const sub = createSub(() => {});
                   const handleChangeRef = { current: () => {} };
                   // We can't subscribe inside this function because it will be called in effect (but need to be called sync)
                   // We only set handleChangeRef (it's something like forceUpdate) inside this function instead
-                  const subscribe = (func: () => void) => {
+                  const syncExternalStoreSubscribe = (func: () => void) => {
                       handleChangeRef.current = func;
 
                       return () => unsubscribe(sub);
                   };
 
-                  return { sub, handleChangeRef, subscribe };
+                  return { sub, handleChangeRef, syncExternalStoreSubscribe };
               }, []);
 
               let value = autoSubscribe(obj, sub);
@@ -308,7 +308,7 @@ const useTagged: UseTagged =
               };
 
               // We just return value from closure inside getSnapshot because we are already subscribed
-              return useSyncExternalStore(subscribe, () => value);
+              return useSyncExternalStore(syncExternalStoreSubscribe, () => value);
           };
 
 export { Signal, Event, Computed, createSignal, createEvent, createComputed, createEffect, useTagged };
