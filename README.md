@@ -18,13 +18,13 @@ Inspired by awesome [_solid-js_](https://www.solidjs.com/) and [_S.js_](https://
 ```javascript
 import {
   createSignal,
-  useTagged
+  useSignal
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
-  const count = useTagged(counter);
+  const count = useSignal(counter);
 
   return (
     <button
@@ -105,39 +105,39 @@ counter.on((count) => console.log(count));
 
 ### Using a signal in a component
 
-You can bind your component with signal with [`useTagged`](#usetagged).<br>
+You can bind your component with signal with [`useSignal`](#usesignal).<br>
 Component will be re-rendered when you write a signal value.
 
 ```javascript
 import {
   createSignal,
-  useTagged
+  useSignal
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
   // Read and bind
-  const count = useTagged(counter);
+  const count = useSignal(counter);
 
   return <div>{count}</div>;
 };
 ```
 
-You can use selector inside [`useTagged`](#usetagged).<br>
+You can use selector with [`useSelector`](#useselector).<br>
 Component will be re-rendered when selected value was changed.
 
 ```javascript
 import {
   createSignal,
-  useTagged
+  useSelector
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
   // Read and bind
-  const roundedCount = useTagged(() =>
+  const roundedCount = useSelector(() =>
     Math.floor(counter() / 10)
   );
 
@@ -150,7 +150,7 @@ Also, you can use props inside selector:
 ```javascript
 import {
   createSignal,
-  useTagged
+  useSelector
 } from 'react-tagged-state';
 
 const users = createSignal({
@@ -161,7 +161,7 @@ const users = createSignal({
 
 const UserCard = ({ userId }) => {
   // Read and bind
-  const userFullName = useTagged(
+  const userFullName = useSelector(
     () => users()[userId].fullName
   );
 
@@ -286,7 +286,7 @@ counter(40);
 roundedCounter(); // 4
 ```
 
-You can use computed in [`useTagged`](#usetagged) as well as signal.
+You can use computed in [`useSignal`](#usesignal) and [`useSelector`](#useselector) as well as signal.
 
 ### Initialize a signal with function
 
@@ -321,14 +321,14 @@ counter((count) => count + 1);
 - [createComputed](#createcomputed)
 - [computed](#computed)
 - [createEffect](#createeffect)
-- [useTagged](#usetagged)
+- [useSignal](#usesignal)
+- [useSelector](#useselector)
 
 ### createSignal
 
 ```typescript
-interface CreateSignal {
-  <T>(value: T): Signal<T>;
-  <T>(selector: () => T): Signal<T>;
+interface createSignal {
+  <T>(initializer: T | (() => T)): Signal<T>;
 }
 ```
 
@@ -360,8 +360,8 @@ interface Signal<T> {
 ```
 
 This function is a value container.<br>
-Reading it will add signal to the deps of [`useTagged`](#usetagged), [`createComputed`](#createcomputed) or [`createEffect`](#createeffect).<br>
-Related [`useTagged`](#usetagged), [`computed`](#computed) or [`createEffect`](#createeffect) will be triggered if signal value was changed.<br>
+Reading it will add signal to the deps of [`useSignal`](#usesignal), [`useSelector`](#useselector), [`createComputed`](#createcomputed) or [`createEffect`](#createeffect).<br>
+Related [`useSignal`](#usesignal), [`useSelector`](#useselector), [`computed`](#computed) or [`createEffect`](#createeffect) will be triggered if signal value was changed.<br>
 You can subscribe to signal by `on`.
 
 ```typescript
@@ -470,8 +470,8 @@ interface Computed<T> {
 ```
 
 This function is a computed value container.<br>
-Reading it will add computed to the deps of [`useTagged`](#usetagged), [`createComputed`](#createcomputed) or [`createEffect`](#createeffect).<br>
-Related [`useTagged`](#usetagged), [`computed`](#computed) or [`createEffect`](#createeffect) will be triggered if computed value was changed.<br>
+Reading it will add computed to the deps of [`useSignal`](#usesignal), [`useSelector`](#useSelector), [`createComputed`](#createcomputed) or [`createEffect`](#createeffect).<br>
+Related [`useSignal`](#usesignal), [`useSelector`](#useselector), [`computed`](#computed) or [`createEffect`](#createeffect) will be triggered if computed value was changed.<br>
 You can subscribe to computed by `on`.<br>
 Nested computed is allowed.
 
@@ -495,14 +495,13 @@ const roundedCount = roundedCounter();
 ### createEffect
 
 ```typescript
-interface CreateEffect {
-  (func: () => void): () => void;
-  (func: () => () => void): () => void;
+interface createEffect {
+  (effect: () => void | (() => void)): () => void;
 }
 ```
 
-`func` will be called immediately and anytime when deps were changed.<br>
-You can return function from `func`. It will be called before next `func` or cleanup call.
+`effect` will be called immediately and anytime when deps were changed.<br>
+You can return function from `effect`. It will be called before next `effect` or cleanup call.
 
 ```typescript
 import {
@@ -531,17 +530,15 @@ cleanup();
 
 ---
 
-### useTagged
+### useSignal
 
 ```typescript
-interface UseTagged {
-  <T>(signal: Signal<T>): T;
-  <T>(computed: Computed<T>): T;
-  <T>(selector: () => T): T;
+interface useSignal {
+  <T>(obj: Signal<T> | Computed<T>): T;
 }
 ```
 
-This hook will re-render Component anytime when deps were changed.
+This hook will re-render Component anytime when signal value was changed.
 
 With signal:<br>
 Hook returns signal value.
@@ -549,13 +546,13 @@ Hook returns signal value.
 ```javascript
 import {
   createSignal,
-  useTagged
+  useSignal
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
-  const count = useTagged(counter);
+  const count = useSignal(counter);
 
   return <div>{count}</div>;
 };
@@ -568,7 +565,7 @@ Hook returns computed value.
 import {
   createSignal,
   createComputed,
-  useTagged
+  useSignal
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
@@ -578,11 +575,23 @@ const roundedCounter = createComputed(() =>
 );
 
 const Counter = () => {
-  const roundedCount = useTagged(roundedCounter);
+  const roundedCount = useSignal(roundedCounter);
 
   return <div>{roundedCount}</div>;
 };
 ```
+
+___
+
+### useSelector
+
+```typescript
+interface useSelector {
+  <T>(obj: Signal<T> | Computed<T> | (() => T)): T;
+}
+```
+
+This hook will re-render Component anytime when deps were changed.
 
 With selector:<br>
 Hook returns selected value.
@@ -590,7 +599,7 @@ Hook returns selected value.
 ```javascript
 import {
   createSignal,
-  useTagged
+  useSelector
 } from 'react-tagged-state';
 
 const users = createSignal({
@@ -600,11 +609,52 @@ const users = createSignal({
 });
 
 const UserCard = ({ userId }) => {
-  const userFullName = useTagged(
+  const userFullName = useSelector(
     () => users()[userId].fullName
   );
 
   return <div>{userFullName}</div>;
+};
+```
+
+With signal:<br>
+Hook returns signal value.
+
+```javascript
+import {
+  createSignal,
+  useSelector
+} from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+const Counter = () => {
+  const count = useSelector(counter);
+
+  return <div>{count}</div>;
+};
+```
+
+With computed:<br>
+Hook returns computed value.
+
+```javascript
+import {
+  createSignal,
+  createComputed,
+  useSelector
+} from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+const roundedCounter = createComputed(() =>
+  Math.floor(counter() / 10)
+);
+
+const Counter = () => {
+  const roundedCount = useSelector(roundedCounter);
+
+  return <div>{roundedCount}</div>;
 };
 ```
 
