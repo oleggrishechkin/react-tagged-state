@@ -1,7 +1,7 @@
 {
     "name": "react-tagged-state",
-    "version": "1.4.2",
-    "description": "⚛️ Experimental reactive and atomic state manager for React",
+    "version": "1.4.3",
+    "description": "⚛️ Experimental reactive and atomic state manager",
     "keywords": [
         "react",
         "tagged",
@@ -12,7 +12,7 @@
         "mobx",
         "valtio"
     ],
-    "homepage": "https://codesandbox.io/s/react-tagged-state-qco1t",
+    "homepage": "https://oleggrishechkin.github.io/react-tagged-state/",
     "license": "MIT",
     "author": {
         "name": "Oleg Grishechkin",
@@ -33,6 +33,7 @@
         "lint:fix": "eslint --quiet --fix .",
         "prettier:fix": "prettier --write .",
         "prettier:fix:readme": "prettier --tab-width 2 --print-width 50 --write README.md",
+        "prettier:fix:docs": "prettier --tab-width 2 --print-width 50 --write website/docs",
         "prepare": "husky install && rimraf lib && tsc"
     },
     "devDependencies": {
