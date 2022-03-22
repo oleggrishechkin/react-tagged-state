@@ -4,11 +4,11 @@ sidebar_position: 1
 
 # Create a computed
 
-Computed is a value container too. It's a combination of signals. Nested computed allowed.
+## Creating
 
-## Create your first computed
+Computed is a value container too. It's a combination of signals.
 
-For create a computed you should call createComputed with selector.
+Let's create a computed!
 
 ```typescript
 import {
@@ -23,9 +23,7 @@ const roundedCounter = createComputed(() =>
 );
 ```
 
-## Read a computed value
-
-Read a signal value by calling computed without arguments:
+Reading a computed value is same as reading signal value:
 
 ```typescript
 import {
@@ -42,8 +40,32 @@ const roundedCounter = createComputed(() =>
 roundedCounter(); // 10
 ```
 
-You can't write a computed value. Anytime when related signals or computed were changed a computed value will be recomputed.
+But we can't write a computed value. Anytime when related signal (or nested computed) value was changed a computed value will be recomputed.
 
-## Use a computed
+## Usage
 
-You can use a computed anywhere as well as a signal.
+We need to use useSignal for connecting computed with component (same as signal, yeah).
+
+```tsx
+import {
+  createSignal,
+  createComputed,
+  useSignal
+} from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+const roundedCounter = createComputed(() =>
+  Math.floor(counter() / 10)
+);
+
+const RoundedCounter = () => {
+  const roundedCount = useSignal(roundedCounter);
+
+  return <div>{roundedCount}</div>;
+};
+```
+
+## Why?
+
+We need a computed when we need to reuse some slow computations. Please, don't use computed for low-cost computations like props accessing. It's not about it.

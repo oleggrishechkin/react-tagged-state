@@ -54,3 +54,20 @@ const Counter = () => {
   return <div>{roundedCount}</div>;
 };
 ```
+
+Without assigning to variable:
+
+```tsx
+import {
+  createSignal,
+  useSignal
+} from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+const Counter = () => {
+  useSignal(counter);
+
+  return <div>{counter()}</div>;
+};
+```

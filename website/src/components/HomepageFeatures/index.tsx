@@ -4,7 +4,7 @@ import styles from './styles.module.css';
 
 type FeatureItem = {
     title: string;
-    Svg: React.ComponentType<React.ComponentProps<'svg'>>;
+    emoji: string;
     description: JSX.Element;
 };
 
@@ -12,28 +12,28 @@ const FeatureList: FeatureItem[] = [
     {
         title: 'Simple',
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        Svg: require('@site/static/img/undraw_docusaurus_mountain.svg').default,
+        emoji: '🔨',
         description: <>No providers, actions, reducers, HOCs and Proxies.</>
     },
     {
         title: 'Fast',
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        Svg: require('@site/static/img/undraw_docusaurus_tree.svg').default,
+        emoji: '🚀',
         description: <>Batch all updates. Notify exactly affected subscribers. Re-render only if needed.</>
     },
     {
         title: 'Small',
         // eslint-disable-next-line @typescript-eslint/no-var-requires
-        Svg: require('@site/static/img/undraw_docusaurus_react.svg').default,
+        emoji: '🤏',
         description: <>Smaller than 1 kb.</>
     }
 ];
 
-function Feature({ title, Svg, description }: FeatureItem) {
+function Feature({ title, emoji, description }: FeatureItem) {
     return (
         <div className={clsx('col col--4')}>
             <div className="text--center">
-                <Svg className={styles.featureSvg} role="img" />
+                <div className={styles.featureEmoji}>{emoji}</div>
             </div>
             <div className="text--center padding-horiz--md">
                 <h3>{title}</h3>

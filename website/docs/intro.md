@@ -13,3 +13,5 @@ React Tagged State requires React 16.8 or later, in order to make use of React H
 ```bash
 npm install --save react-tagged-state
 ```
+
+Now let's create a simple counter app with React Tagged State.

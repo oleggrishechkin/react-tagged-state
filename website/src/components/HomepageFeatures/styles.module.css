@@ -5,7 +5,8 @@
     width: 100%;
 }
 
-.featureSvg {
-    height: 200px;
+.featureEmoji {
+    font-size: 4rem;
     width: 200px;
+    margin: auto;
 }

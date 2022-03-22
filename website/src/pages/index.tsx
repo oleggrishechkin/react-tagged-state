@@ -20,7 +20,7 @@ function HomepageHeader() {
                 <p className="hero__subtitle">{siteConfig.tagline}</p>
                 <div className={styles.buttons}>
                     <Link className="button button--secondary button--lg" to="/docs/intro">
-                        React Tagged State Tutorial - 1min ⏱️
+                        Tutorial - 1min ⏱️
                     </Link>
                 </div>
             </div>

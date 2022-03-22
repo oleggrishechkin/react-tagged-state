@@ -12,7 +12,8 @@ const config = {
     baseUrl: '/react-tagged-state/',
     onBrokenLinks: 'throw',
     onBrokenMarkdownLinks: 'warn',
-    favicon: 'img/favicon.ico',
+    favicon:
+        'data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>⚛️</text></svg>',
     organizationName: 'oleggrishechkin', // Usually your GitHub org/user name.
     projectName: 'react-tagged-state', // Usually your repo name.
 
@@ -40,7 +41,7 @@ const config = {
                 title: 'React Tagged State',
                 logo: {
                     alt: 'React Tagged State Logo',
-                    src: 'img/logo.svg'
+                    src: 'img/logo.png'
                 },
                 items: [
                     {
