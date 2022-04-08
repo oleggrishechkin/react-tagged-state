@@ -9,6 +9,8 @@ import {
     useSyncExternalStore
 } from 'react';
 
+let clock = {};
+
 interface Sub {
     __callback: () => void;
     __cleanups: Set<(subToDelete: Sub) => void>;
@@ -18,39 +20,54 @@ interface Signal<T> {
     (): T;
     (updater: T | ((value: T) => T)): T;
     readonly on: (callback: (value: T) => void) => () => void;
+    readonly __subs: Set<Sub>;
+    readonly __cleanup: (sub: Sub) => void;
+    __value: T;
+    __nextValue: { current: T } | null;
 }
 
 interface Event<T = void> {
     (payload: T): T;
     readonly on: (callback: (payload: T) => void) => () => void;
+    readonly __callbacks: Set<(payload: T) => void>;
 }
 
 interface Computed<T> {
     (): T;
     readonly on: (callback: (value: T) => void) => () => void;
+    readonly __sub: Sub;
+    readonly __subs: Set<Sub>;
+    readonly __cleanup: (sub: Sub) => void;
+    __value: T | null;
+    __nextValue: { current: T } | null;
 }
 
 let currentSub: Sub | null = null;
 
-let batchedObjsSubs: Set<Set<Sub>> | null = null;
+let batchedObjs: Set<Signal<any> | Computed<any>> | null = null;
 
-const scheduleNotify = (subs: Set<Sub>) => {
-    if (batchedObjsSubs) {
-        batchedObjsSubs.add(subs);
+const scheduleNotify = (obj: Signal<any> | Computed<any>) => {
+    if (batchedObjs) {
+        batchedObjs.add(obj);
 
         return;
     }
 
-    batchedObjsSubs = new Set([subs]);
+    batchedObjs = new Set([obj]);
     Promise.resolve().then(() => {
-        const objsSubs = batchedObjsSubs as Set<Set<Sub>>;
+        const objs = batchedObjs!;
 
-        batchedObjsSubs = null;
+        batchedObjs = null;
 
         // We need to collect all subs to calling each of them once
         const uniqueSubs = new Set<Sub>();
 
-        objsSubs.forEach((objSubs) => objSubs.forEach((sub) => uniqueSubs.add(sub)));
+        objs.forEach((obj) => {
+            obj.__value = obj.__nextValue!.current;
+            obj.__nextValue = null;
+            obj.__subs.forEach((sub) => uniqueSubs.add(sub));
+        });
+        clock = {};
         uniqueSubs.forEach((sub) => sub.__callback());
     });
 };
@@ -104,34 +121,40 @@ const sample = <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
 };
 
 const createSignal = <T>(initializer: T | (() => T)) => {
-    let value = typeof initializer === 'function' ? (initializer as () => T)() : initializer;
-    const subs = new Set<Sub>();
-    const cleanup = (subToDelete: Sub) => subs.delete(subToDelete);
     const signal: Signal<T> = Object.assign(
         (...args: any[]) => {
             if (args.length) {
-                const nextValue = typeof args[0] === 'function' ? args[0](value) : args[0];
+                if (signal.__nextValue) {
+                    signal.__nextValue.current =
+                        typeof args[0] === 'function' ? args[0](signal.__nextValue.current) : args[0];
 
-                if (nextValue === value) {
-                    return value;
+                    return signal.__value;
                 }
 
-                value = nextValue;
+                const nextValue = typeof args[0] === 'function' ? args[0](signal.__value) : args[0];
 
-                // We don't need to add signal to the batchedObjs if signal has no subs
-                if (subs.size) {
-                    scheduleNotify(subs);
+                if (nextValue === signal.__value) {
+                    return signal.__value;
                 }
 
-                return value;
+                if (signal.__subs.size) {
+                    signal.__nextValue = { current: nextValue };
+                    scheduleNotify(signal);
+
+                    return signal.__value;
+                }
+
+                signal.__value = nextValue;
+
+                return signal.__value;
             }
 
             if (currentSub) {
-                subs.add(currentSub);
-                currentSub.__cleanups.add(cleanup);
+                signal.__subs.add(currentSub);
+                currentSub.__cleanups.add(signal.__cleanup);
             }
 
-            return value;
+            return signal.__value;
         },
         {
             on: (callback: (value: T) => void): (() => void) => {
@@ -140,7 +163,11 @@ const createSignal = <T>(initializer: T | (() => T)) => {
                 autoSubscribe(signal, sub);
 
                 return () => unsubscribe(sub);
-            }
+            },
+            __subs: new Set<Sub>(),
+            __cleanup: (sub: Sub) => signal.__subs.delete(sub),
+            __nextValue: null,
+            __value: typeof initializer === 'function' ? (initializer as () => T)() : initializer
         }
     );
 
@@ -148,21 +175,21 @@ const createSignal = <T>(initializer: T | (() => T)) => {
 };
 
 const createEvent = <T = void>(): Event<T> => {
-    const callbacks = new Set<(payload: T) => void>();
     const event: Event<T> = Object.assign(
         (payload: T) => {
-            callbacks.forEach((callback) => callback(payload));
+            event.__callbacks.forEach((callback) => callback(payload));
 
             return payload;
         },
         {
             on: (callback: (payload: T) => void) => {
-                callbacks.add(callback);
+                event.__callbacks.add(callback);
 
                 return () => {
-                    callbacks.delete(callback);
+                    event.__callbacks.delete(callback);
                 };
-            }
+            },
+            __callbacks: new Set<(payload: T) => void>()
         }
     );
 
@@ -170,37 +197,20 @@ const createEvent = <T = void>(): Event<T> => {
 };
 
 const createComputed = <T>(selector: () => T): Computed<T> => {
-    let value: T;
-    const subs = new Set<Sub>();
-    const sub = createSub(() => {
-        if (subs.size) {
-            const nextValue = autoSubscribe(selector, sub);
-
-            if (nextValue !== value) {
-                value = nextValue;
-                scheduleNotify(subs);
-            }
-
-            return;
-        }
-
-        unsubscribe(sub);
-    });
-    const cleanup = (subToDelete: Sub) => subs.delete(subToDelete);
     const computed: Computed<T> = Object.assign(
         () => {
             if (currentSub) {
-                subs.add(currentSub);
-                currentSub.__cleanups.add(cleanup);
+                computed.__subs.add(currentSub);
+                currentSub.__cleanups.add(computed.__cleanup);
             }
 
-            if (sub.__cleanups.size) {
-                return value;
+            if (computed.__sub.__cleanups.size) {
+                return computed.__value!;
             }
 
-            value = autoSubscribe(selector, sub);
+            computed.__value = autoSubscribe(selector, computed.__sub);
 
-            return value;
+            return computed.__value;
         },
         {
             on: (callback: (value: T) => void): (() => void) => {
@@ -209,7 +219,41 @@ const createComputed = <T>(selector: () => T): Computed<T> => {
                 autoSubscribe(computed, sub);
 
                 return () => unsubscribe(sub);
-            }
+            },
+            __sub: createSub(() => {
+                if (computed.__subs.size) {
+                    if (computed.__nextValue) {
+                        computed.__nextValue.current = autoSubscribe(selector, computed.__sub);
+
+                        return;
+                    }
+
+                    const nextValue = autoSubscribe(selector, computed.__sub);
+
+                    if (nextValue !== computed.__value) {
+                        computed.__nextValue = { current: nextValue };
+                        scheduleNotify(computed);
+                    }
+
+                    return;
+                }
+
+                computed.__nextValue = null;
+                unsubscribe(computed.__sub);
+            }),
+            __subs: new Set<Sub>(),
+            __cleanup: (sub: Sub) => {
+                computed.__subs.delete(sub);
+
+                if (computed.__subs.size) {
+                    return;
+                }
+
+                computed.__nextValue = null;
+                unsubscribe(computed.__sub);
+            },
+            __value: null,
+            __nextValue: null
         }
     );
 
@@ -283,7 +327,7 @@ const useSelector = <T>(obj: Signal<T> | Computed<T> | (() => T)): T => {
 
     if (vars.current === null) {
         vars.current = {
-            sub: createSub(() => {}),
+            sub: createSub(() => vars.current!.handleChange()),
             handleChange: () => {},
             subscribe: (handleChange: () => void) => {
                 vars.current!.handleChange = handleChange;
@@ -293,16 +337,18 @@ const useSelector = <T>(obj: Signal<T> | Computed<T> | (() => T)): T => {
         };
     }
 
-    let value = autoSubscribe(obj, vars.current.sub);
+    let currentClock: typeof clock;
+    let value: T;
 
-    // We need to set sub callback because value and obj can be different during component re-render
-    vars.current.sub.__callback = () => {
-        value = autoSubscribe(obj, vars.current!.sub);
-        vars.current!.handleChange();
-    };
+    return useSyncExternalStoreShim(vars.current.subscribe, () => {
+        if (currentClock === undefined || currentClock !== clock) {
+            currentClock = clock;
 
-    // We just return value from closure inside getSnapshot because we are already subscribed
-    return useSyncExternalStoreShim(vars.current.subscribe, () => value);
+            value = autoSubscribe(obj, vars.current!.sub);
+        }
+
+        return value;
+    });
 };
 
 export {
