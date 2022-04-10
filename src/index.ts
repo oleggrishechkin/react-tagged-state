@@ -13,7 +13,7 @@ let clock = {};
 
 interface Sub {
     __callback: () => void;
-    __cleanups: Set<(subToDelete: Sub) => void>;
+    __objs: Set<Signal<any> | Computed<any>>;
 }
 
 interface Signal<T> {
@@ -21,7 +21,6 @@ interface Signal<T> {
     (updater: T | ((value: T) => T)): T;
     readonly on: (callback: (value: T) => void) => () => void;
     readonly __subs: Set<Sub>;
-    readonly __cleanup: (sub: Sub) => void;
     __value: T;
     __nextValue: { current: T } | null;
 }
@@ -37,7 +36,6 @@ interface Computed<T> {
     readonly on: (callback: (value: T) => void) => () => void;
     readonly __sub: Sub;
     readonly __subs: Set<Sub>;
-    readonly __cleanup: (sub: Sub) => void;
     __value: T | null;
     __nextValue: { current: T } | null;
 }
@@ -74,20 +72,30 @@ const scheduleNotify = (obj: Signal<any> | Computed<any>) => {
 
 const createSub = (callback: () => void): Sub => ({
     __callback: callback,
-    __cleanups: new Set()
+    __objs: new Set()
 });
 
 const unsubscribe = (sub: Sub) => {
-    const cleanups = sub.__cleanups;
+    const objs = sub.__objs;
 
-    sub.__cleanups = new Set();
-    cleanups.forEach((cleanup) => cleanup(sub));
+    sub.__objs = new Set();
+    objs.forEach((obj) => {
+        obj.__subs.delete(sub);
+
+        if (obj.__subs.size) {
+            return;
+        }
+
+        if ('__sub' in obj) {
+            unsubscribe(obj.__sub);
+        }
+    });
 };
 
 const autoSubscribe = <T>(func: () => T, sub: Sub) => {
-    const prevCleanups = sub.__cleanups;
+    const prevObjs = sub.__objs;
 
-    sub.__cleanups = new Set();
+    sub.__objs = new Set();
 
     const prevGlobalSub = currentSub;
 
@@ -97,12 +105,20 @@ const autoSubscribe = <T>(func: () => T, sub: Sub) => {
 
     currentSub = prevGlobalSub;
     // If prev obj has not in next objs we need to unsubscribe from it
-    prevCleanups.forEach((cleanup) => {
-        if (sub.__cleanups.has(cleanup)) {
+    prevObjs.forEach((obj) => {
+        if (sub.__objs.has(obj)) {
             return;
         }
 
-        cleanup(sub);
+        obj.__subs.delete(sub);
+
+        if (obj.__subs.size) {
+            return;
+        }
+
+        if ('__sub' in obj) {
+            unsubscribe(obj.__sub);
+        }
     });
 
     return value;
@@ -151,7 +167,7 @@ const createSignal = <T>(initializer: T | (() => T)) => {
 
             if (currentSub) {
                 signal.__subs.add(currentSub);
-                currentSub.__cleanups.add(signal.__cleanup);
+                currentSub.__objs.add(signal);
             }
 
             return signal.__value;
@@ -165,7 +181,6 @@ const createSignal = <T>(initializer: T | (() => T)) => {
                 return () => unsubscribe(sub);
             },
             __subs: new Set<Sub>(),
-            __cleanup: (sub: Sub) => signal.__subs.delete(sub),
             __nextValue: null,
             __value: typeof initializer === 'function' ? (initializer as () => T)() : initializer
         }
@@ -201,10 +216,10 @@ const createComputed = <T>(selector: () => T): Computed<T> => {
         () => {
             if (currentSub) {
                 computed.__subs.add(currentSub);
-                currentSub.__cleanups.add(computed.__cleanup);
+                currentSub.__objs.add(computed);
             }
 
-            if (computed.__sub.__cleanups.size) {
+            if (computed.__sub.__objs.size) {
                 return computed.__value!;
             }
 
@@ -242,16 +257,6 @@ const createComputed = <T>(selector: () => T): Computed<T> => {
                 unsubscribe(computed.__sub);
             }),
             __subs: new Set<Sub>(),
-            __cleanup: (sub: Sub) => {
-                computed.__subs.delete(sub);
-
-                if (computed.__subs.size) {
-                    return;
-                }
-
-                computed.__nextValue = null;
-                unsubscribe(computed.__sub);
-            },
             __value: null,
             __nextValue: null
         }
