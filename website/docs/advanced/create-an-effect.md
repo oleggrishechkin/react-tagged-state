@@ -46,4 +46,4 @@ cleanup();
 
 ## Why?
 
-Basically, we should avoid effects. But it's useful in useEffect, when we want to run some function but don't want to re-render our component. ([see useSignalEffect](../api-reference/useSignalEffect.md))
+Basically, we should avoid effects. But it's useful in useEffect, when we want to run some function but don't want to re-render our component.

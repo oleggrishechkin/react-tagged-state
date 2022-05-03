@@ -1,13 +1,5 @@
-import {
-    DependencyList,
-    useEffect,
-    useLayoutEffect,
-    useRef,
-    useState,
-    // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-    // @ts-ignore
-    useSyncExternalStore
-} from 'react';
+import { useRef } from 'react';
+import { useSyncExternalStore } from 'use-sync-external-store/shim';
 
 let clock = {};
 
@@ -16,7 +8,7 @@ interface Sub {
     __objs: Set<Signal<any> | Computed<any>>;
 }
 
-interface Signal<T> {
+export interface Signal<T> {
     (): T;
     (updater: T | ((value: T) => T)): T;
     readonly on: (callback: (value: T) => void) => () => void;
@@ -25,13 +17,13 @@ interface Signal<T> {
     __nextValue: { current: T } | null;
 }
 
-interface Event<T = void> {
+export interface Event<T = void> {
     (payload: T): T;
     readonly on: (callback: (payload: T) => void) => () => void;
     readonly __callbacks: Set<(payload: T) => void>;
 }
 
-interface Computed<T> {
+export interface Computed<T> {
     (): T;
     readonly on: (callback: (value: T) => void) => () => void;
     readonly __sub: Sub;
@@ -57,7 +49,6 @@ const scheduleNotify = (obj: Signal<any> | Computed<any>) => {
 
         batchedObjs = null;
 
-        // We need to collect all subs to calling each of them once
         const uniqueSubs = new Set<Sub>();
 
         objs.forEach((obj) => {
@@ -104,7 +95,6 @@ const autoSubscribe = <T>(func: () => T, sub: Sub) => {
     const value = func();
 
     currentSub = prevGlobalSub;
-    // If prev obj has not in next objs we need to unsubscribe from it
     prevObjs.forEach((obj) => {
         if (sub.__objs.has(obj)) {
             return;
@@ -124,7 +114,7 @@ const autoSubscribe = <T>(func: () => T, sub: Sub) => {
     return value;
 };
 
-const sample = <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
+export const sample = <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
     const prevGlobalSub = currentSub;
 
     currentSub = null;
@@ -136,7 +126,7 @@ const sample = <T>(obj: Signal<T> | Computed<T> | (() => T)) => {
     return value;
 };
 
-const createSignal = <T>(initializer: T | (() => T)) => {
+export const createSignal = <T>(initializer: T | (() => T)) => {
     const signal: Signal<T> = Object.assign(
         (...args: any[]) => {
             if (args.length) {
@@ -189,7 +179,7 @@ const createSignal = <T>(initializer: T | (() => T)) => {
     return signal;
 };
 
-const createEvent = <T = void>(): Event<T> => {
+export const createEvent = <T = void>(): Event<T> => {
     const event: Event<T> = Object.assign(
         (payload: T) => {
             event.__callbacks.forEach((callback) => callback(payload));
@@ -211,7 +201,7 @@ const createEvent = <T = void>(): Event<T> => {
     return event;
 };
 
-const createComputed = <T>(selector: () => T): Computed<T> => {
+export const createComputed = <T>(selector: () => T): Computed<T> => {
     const computed: Computed<T> = Object.assign(
         () => {
             if (currentSub) {
@@ -265,7 +255,7 @@ const createComputed = <T>(selector: () => T): Computed<T> => {
     return computed;
 };
 
-const createEffect = (effect: () => void | (() => void)) => {
+export const createEffect = (effect: () => void | (() => void)) => {
     let value: void | (() => void);
     const sub = createSub(() => {
         if (typeof value === 'function') {
@@ -286,44 +276,9 @@ const createEffect = (effect: () => void | (() => void)) => {
     };
 };
 
-const useSyncExternalStoreShim =
-    typeof useSyncExternalStore === 'undefined'
-        ? <T>(subscribe: (handleChange: () => void) => () => void, getSnapshot: () => T) => {
-              const value = getSnapshot();
-              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
+export const useSignal = <T>(obj: Signal<T> | Computed<T>): T => useSyncExternalStore(obj.on, obj);
 
-              useLayoutEffect(() => {
-                  inst.value = value;
-                  inst.getSnapshot = getSnapshot;
-
-                  if (inst.value !== inst.getSnapshot()) {
-                      forceUpdate({ inst });
-                  }
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [value, getSnapshot]);
-              useEffect(() => {
-                  if (inst.value !== inst.getSnapshot()) {
-                      forceUpdate({ inst });
-                  }
-
-                  return subscribe(() => {
-                      if (inst.value !== inst.getSnapshot()) {
-                          forceUpdate({ inst });
-                      }
-                  });
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [subscribe]);
-
-              return value;
-          }
-        : useSyncExternalStore;
-
-const useSignal = <T>(obj: Signal<T> | Computed<T>): T => useSyncExternalStoreShim(obj.on, obj);
-
-const useSignalEffect = (effect: () => void | (() => void), deps?: DependencyList) =>
-    useEffect(() => createEffect(effect), deps);
-
-const useSelector = <T>(obj: Signal<T> | Computed<T> | (() => T)): T => {
+export const useSelector = <T>(obj: Signal<T> | Computed<T> | (() => T)): T => {
     const vars = useRef<{
         sub: Sub;
         handleChange: () => void;
@@ -345,27 +300,12 @@ const useSelector = <T>(obj: Signal<T> | Computed<T> | (() => T)): T => {
     let currentClock: typeof clock;
     let value: T;
 
-    return useSyncExternalStoreShim(vars.current.subscribe, () => {
-        if (currentClock === undefined || currentClock !== clock) {
+    return useSyncExternalStore(vars.current.subscribe, () => {
+        if (currentClock !== clock) {
             currentClock = clock;
-
             value = autoSubscribe(obj, vars.current!.sub);
         }
 
         return value;
     });
-};
-
-export {
-    Signal,
-    Event,
-    Computed,
-    sample,
-    createSignal,
-    createEvent,
-    createComputed,
-    createEffect,
-    useSignal,
-    useSelector,
-    useSignalEffect
 };

@@ -35,6 +35,4 @@ Open [CodeSandbox](https://codesandbox.io/s/react-tagged-state-qco1t)
 
 ## Performance
 
-Batch all updates. Notify exactly affected subscribers. Re-render only if needed.
-
 See results on [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html).
