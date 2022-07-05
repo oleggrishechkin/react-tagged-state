@@ -6,13 +6,13 @@ sidebar_position: 7
 
 ```typescript
 interface createEffect {
-  (effect: () => void | (() => void)): () => void;
+  (func: () => void | (() => void)): () => void;
 }
 ```
 
-`effect` will be called immediately and anytime when related signals or computed were changed.
+`func` will be called immediately and anytime when related signals or computed were changed.
 
-You can return function from `effect`. It will be called before next `effect` or cleanup call.
+You can return function from `func`. It will be called before next `func` or cleanup call.
 
 ```typescript
 import {

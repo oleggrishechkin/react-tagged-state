@@ -6,9 +6,9 @@ sidebar_position: 6
 
 ```typescript
 interface Event<T = void> {
-  (payload: T): T;
+  (value: T): T;
   readonly on: (
-    callback: (payload: T) => void
+    callback: (value: T) => void
   ) => () => void;
 }
 ```
@@ -23,7 +23,7 @@ const resetEvent = createEvent();
 
 resetEvent();
 
-resetEvent.on((payload) =>
-  console.log(`reset ${payload}`)
+resetEvent.on((value) =>
+  console.log(`reset ${value}`)
 );
 ```

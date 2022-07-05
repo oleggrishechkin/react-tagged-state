@@ -6,7 +6,7 @@ sidebar_position: 8
 
 ```typescript
 interface useSignal {
-  <T>(obj: Signal<T> | Computed<T>): T;
+  <T>(signal: ReadOnlySignal<T>): T;
 }
 ```
 

@@ -7,7 +7,7 @@ sidebar_position: 9
 ```typescript
 interface useSelector {
   <T>(
-    obj: Signal<T> | Computed<T> | (() => T)
+    func: () => T
   ): T;
 }
 ```

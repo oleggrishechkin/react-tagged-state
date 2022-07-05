@@ -7,8 +7,7 @@ sidebar_position: 2
 ```typescript
 interface Signal<T> {
   (): T;
-  (value: T): T;
-  (updater: (value: T) => T): T;
+  (updater: T | ((value: T) => T)): T;
   readonly on: (
     callback: (value: T) => void
   ) => () => void;

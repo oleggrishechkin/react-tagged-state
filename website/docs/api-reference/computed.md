@@ -5,7 +5,7 @@ sidebar_position: 4
 # computed
 
 ```typescript
-interface Computed<T> {
+interface ReadOnlySignal<T> {
   (): T;
   readonly on: (
     callback: (value: T) => void

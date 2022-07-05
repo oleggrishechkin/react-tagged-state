@@ -19,7 +19,7 @@ const FeatureList: FeatureItem[] = [
         title: 'Fast',
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         emoji: '🚀',
-        description: <>Batch all updates. Notify exactly affected subscribers. Re-render only if needed.</>
+        description: <>Notify exactly affected subscribers. Re-render only if needed.</>
     },
     {
         title: 'Small',
