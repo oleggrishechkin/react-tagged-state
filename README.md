@@ -7,246 +7,73 @@
 [![NPM total downloads](https://img.shields.io/npm/dt/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-tagged-state?minimal=true)
 [![NPM monthly downloads](https://img.shields.io/npm/dm/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-tagged-state?minimal=true)
 
-⚛️ Experimental reactive and atomic state manager
 
-**React Tagged State** uses the same reactivity pattern as [SolidJS](https://www.solidjs.com/) and [S.js](https://github.com/adamhaile/S) but optimized for usage with React.
+#### "Single Source Of Truth" state management library. Works well with Next.js.
 
-- Updates batched automatically.
-- Affected subscribers called only once per batch.
-- Lazy computed.
+The main idea is using proxy to collect property path for better typings and setting deeply nested properties. It's like an optics/lens.
 
 ## Basic Usage
 
 ```typescript jsx
-import {
-  createSignal,
-  useSelector,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
+import { store, useStore } from './store';
 
 const Counter = () => {
-  const count = useSelector(counter);
+    const [count, setCount] = useStore(store.count);
+
+    return <button onClick={() => setCount((value) => value + 1)}>{count}</button>;
+};
+```
+
+## Setup
+
+First, create a store:
+
+```typescript
+// store.ts
+import { createStore } from 'react-tagged-state';
+
+export interface State {
+  count: number
+}
+
+const [store, Provider, useStore] = createStore<State>({ count: 0 });
+
+export { store, Provider, useStore };
+```
+
+`store` is a Proxy to collect property path.<br>
+`Provider` create pub/sub instance with state variable.
+
+Second, wrap app in Provider:
+
+```typescript jsx
+// App.tsx
+import { State, store, Provider } from './store';
+
+const App = ({ initialState }: { initialState: State }) => {
+  const [count, setCount] = useStore(store.count);
 
   return (
-    <button
-      onClick={() =>
-        counter((value) => value + 1)
-      }
-    >
+    <Provider state={initialState}>
+      ...
+    </Provider>
+  );
+};
+```
+
+Third, use store:
+
+```typescript jsx
+// Counter.tsx
+import { store, useStore } from './store';
+
+const Counter = () => {
+  const [count, setCount] = useStore(store.count);
+
+  return (
+    <button onClick={() => setCount((value) => value + 1)}>
       {count}
     </button>
   );
 };
 ```
-
-## Introduction
-
-Base part of React Tagged State is a signals and effects.<br>
-Signal is a value container. It can read and write value.<br>
-Effect is an observer. It automatically tracks what signals was read inside it and call self anytime when any of these signals changed.
-
-```typescript jsx
-import {
-  createSignal,
-  createEffect,
-} from 'react-tagged-state';
-
-const initialValue = 0;
-
-const counter = createSignal(initialValue);
-
-createEffect(() => {
-  console.log('counter changed: ', counter());
-});
-
-counter(10); // counter changed: 10
-
-counter((count) => count + 1); // counter changed: 11
-
-counter(initialValue); // counter changed: 0
-```
-
-## API Overview
-
-### Signals
-
-Create a signal by calling `createSignal` with initial value:
-
-```typescript jsx
-import { createSignal } from 'react-tagged-state';
-
-const counter = createSignal(0);
-```
-
-Read value by calling a signal without arguments, write value by calling a signal with next value:
-
-```typescript jsx
-import { createSignal } from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-// read
-const value = counter();
-
-// write with value
-counter(10);
-
-// write with function
-counter((count) => count + 1);
-```
-
-### React & Hooks
-
-Subscribe component to a signal, computed or selector by calling `useSelector`:
-
-```typescript jsx
-import {
-  createSignal,
-  useSelector,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-const Counter = () => {
-  const count = useSelector(counter);
-
-  return (
-    <button
-      onClick={() =>
-        counter((value) => value + 1)
-      }
-    >
-      {count}
-    </button>
-  );
-};
-```
-
-Use props inside `useSelector`:
-
-```typescript jsx
-import {
-  createSignal,
-  useSelector,
-} from 'react-tagged-state';
-
-const items = createSignal<
-  Partial<
-    Record<string, { id: string; title: string }>
-  >
->({ id: { id: '0', title: 'title' } });
-
-const Item = ({ itemId }: { itemId: string }) => {
-  const item = useSelector(
-    () => items()?.[itemId],
-  );
-
-  if (!item) {
-    return null;
-  }
-
-  return <div>{item.title}</div>;
-};
-```
-
-### Computed
-
-Create a computed by calling `createComputed` with selector:
-
-```typescript jsx
-import {
-  createSignal,
-  createComputed,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-const doubledCounter = createComputed(
-  () => counter() * 2,
-);
-```
-
-> 💡 Computed select value when you read it first time or when its dependencies changed. Computed unsubscribed automatically when nothing depends on it.
-
-Read value by calling a computed without arguments:
-
-```typescript jsx
-import {
-  createSignal,
-  createComputed,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-const doubledCounter = createComputed(
-  () => counter() * 2,
-);
-
-// read
-const value = doubledCounter();
-```
-
-### Effects
-
-Create an effect by calling `createEffect` with callback:
-
-```typescript jsx
-import {
-  createSignal,
-  createEffect,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-const unsubscribe = createEffect(() => {
-  console.log(counter());
-});
-```
-
-### Subscriptions
-
-Create a subscription by calling `createSubscription` with signal, computed or selector and callback:
-
-```typescript jsx
-import {
-  createSignal,
-  createSubscription,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-const unsubscribe = createSubscription(
-  counter,
-  (value) => {
-    console.log(value);
-  },
-);
-```
-
-### Batching
-
-Updates batched automatically via microtask. Run batched updates immediately by calling `sync`:
-
-```typescript jsx
-import {
-  createSignal,
-  sync,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-counter(10);
-
-sync();
-```
-
-> 💡 `sync` called automatically when you read any computed.
-
-## Example
-
-Open [CodeSandbox](https://codesandbox.io/s/react-tagged-state-qco1t)
-
-## Performance
-
-See results on [js-framework-benchmark](https://rawgit.com/krausest/js-framework-benchmark/master/webdriver-ts-results/table.html).
