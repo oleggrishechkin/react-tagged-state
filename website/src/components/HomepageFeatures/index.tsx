@@ -25,7 +25,7 @@ const FeatureList: FeatureItem[] = [
         title: 'Small',
         // eslint-disable-next-line @typescript-eslint/no-var-requires
         emoji: '🤏',
-        description: <>Smaller than 1 kb.</>
+        description: <>Just 1 kb of reactivity</>
     }
 ];
 

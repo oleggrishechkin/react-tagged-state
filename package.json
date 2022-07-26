@@ -1,6 +1,6 @@
 {
     "name": "react-tagged-state",
-    "version": "1.6.0",
+    "version": "1.8.0",
     "description": "⚛️ Experimental reactive and atomic state manager",
     "keywords": [
         "react",
@@ -37,9 +37,8 @@
         "prepare": "husky install && rimraf lib && tsc"
     },
     "devDependencies": {
-        "@types/react": "^17.0.2",
-        "@types/react-dom": "^17.0.2",
-        "@types/use-sync-external-store": "0.0.3",
+        "@types/react": "^18.0.15",
+        "@types/react-dom": "^18.0.6",
         "babel-eslint": "^10.1.0",
         "configs-og": "^3.0.7",
         "eslint": "^7.32.0",
@@ -49,7 +48,7 @@
         "react": "^17.0.1",
         "react-dom": "^17.0.1",
         "rimraf": "^3.0.2",
-        "typescript": "^4.2.2"
+        "typescript": "^4.7.4"
     },
     "peerDependencies": {
         "react": ">=16.8.0"
@@ -74,8 +73,5 @@
     "prettier": "configs-og/prettier.config.js",
     "lint-staged": {
         "*.(js|jsx|ts|tsx)": "eslint --quiet"
-    },
-    "dependencies": {
-        "use-sync-external-store": "^1.1.0"
     }
 }

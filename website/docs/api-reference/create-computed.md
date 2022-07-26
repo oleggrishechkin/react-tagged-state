@@ -6,7 +6,7 @@ sidebar_position: 3
 
 ```typescript
 interface createComputed {
-  <T>(func: () => T): ReadOnlySignal<T>;
+  <T>(func: () => T): Computed<T>;
 }
 ```
 
