@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 const noop = () => {};
 
@@ -15,8 +15,6 @@ const CLOCK = Symbol();
 const SUBSCRIBERS = Symbol();
 
 const SUBSCRIBER = Symbol();
-
-const SUBSCRIBE = Symbol();
 
 export interface Subscriber {
     [CALLBACK]: () => void;
@@ -111,7 +109,7 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber) => {
     return value;
 };
 
-const createSubscriber = (callback: () => void) => ({
+const createSubscriber = (callback: () => void = noop) => ({
     [CALLBACK]: callback,
     [SIGNALS]: new Set<Signal<any> | Computed<any>>(),
     [CLOCK]: clock
@@ -246,48 +244,44 @@ export const createEffect = (func: () => void | (() => void)): (() => void) => {
 export const useSelector =
     typeof useSyncExternalStore === 'undefined'
         ? <T>(func: () => T): T => {
-              const [state, setState] = useState(() => ({ [SUBSCRIBER]: createSubscriber(noop) }));
-              let value = isSSR ? func() : autoSubscribe(func, state[SUBSCRIBER]);
+              const subscriber = useMemo(createSubscriber, []);
+              const [, forceUpdate] = useState({});
+              let value = isSSR ? func() : autoSubscribe(func, subscriber);
 
-              state[SUBSCRIBER][CALLBACK] = () => {
-                  const nextValue = isSSR ? func() : autoSubscribe(func, state[SUBSCRIBER]);
+              subscriber[CALLBACK] = () => {
+                  const nextValue = isSSR ? func() : autoSubscribe(func, subscriber);
 
                   if (nextValue !== value) {
                       value = nextValue;
-                      setState((state) => ({ [SUBSCRIBER]: state[SUBSCRIBER] }));
+                      forceUpdate({});
                   }
               };
 
-              useEffect(() => () => autoSubscribe(noop, state[SUBSCRIBER]));
+              useEffect(() => () => autoSubscribe(noop, subscriber), [subscriber]);
 
               return value;
           }
         : <T>(func: () => T): T => {
-              const ref = useRef<{
-                  [SUBSCRIBER]: Subscriber;
-                  [SUBSCRIBE]: (handleChange: () => void) => () => void;
-              } | null>(null);
-
-              if (ref.current === null) {
-                  ref.current = {
-                      [SUBSCRIBER]: createSubscriber(noop),
-                      [SUBSCRIBE]: (handleChange: () => void) => {
-                          ref.current![SUBSCRIBER][CALLBACK] = handleChange;
-
-                          return () => autoSubscribe(noop, ref.current![SUBSCRIBER]);
-                      }
-                  };
-              }
-
+              const subscriber = useMemo(createSubscriber, []);
               let currentClock: typeof clock;
               let value: T;
 
-              return useSyncExternalStore(ref.current[SUBSCRIBE], () => {
-                  if (currentClock !== clock) {
-                      currentClock = clock;
-                      value = isSSR ? func() : autoSubscribe(func, ref.current![SUBSCRIBER]);
-                  }
+              return useSyncExternalStore(
+                  useCallback(
+                      (handleChange) => {
+                          subscriber[CALLBACK] = handleChange;
 
-                  return value;
-              });
+                          return () => autoSubscribe(noop, subscriber);
+                      },
+                      [subscriber]
+                  ),
+                  () => {
+                      if (currentClock !== clock) {
+                          currentClock = clock;
+                          value = isSSR ? func() : autoSubscribe(func, subscriber);
+                      }
+
+                      return value;
+                  }
+              );
           };
