@@ -44,13 +44,13 @@ But we can't write a computed value. Anytime when related signal (or nested comp
 
 ## Usage
 
-We need to use useSignal for connecting computed with component (same as signal, yeah).
+We need to use useSelector for connecting computed with component (same as signal, yeah).
 
 ```tsx
 import {
   createSignal,
   createComputed,
-  useSignal
+  useSelector
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
@@ -60,7 +60,7 @@ const roundedCounter = createComputed(() =>
 );
 
 const RoundedCounter = () => {
-  const roundedCount = useSignal(roundedCounter);
+  const roundedCount = useSelector(roundedCounter);
 
   return <div>{roundedCount}</div>;
 };

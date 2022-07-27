@@ -6,18 +6,18 @@ sidebar_position: 2
 
 React Tagged State use hooks for connecting signals with components.
 
-We can use useSignal hook for this:
+We can use useSelector hook for this:
 
 ```tsx
 import {
   createSignal,
-  useSignal
+  useSelector
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
-  const count = useSignal(counter);
+  const count = useSelector(counter);
 
   return <div>{count}</div>;
 };

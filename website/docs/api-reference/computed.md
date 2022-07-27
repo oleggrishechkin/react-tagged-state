@@ -14,7 +14,7 @@ interface Computed<T> {
 ```
 
 - This function is a value container.
-- Read by calling computed without arguments. Reading it will add computed to the deps of useSignal, useSelector, createComputed or createEffect.
+- Read by calling computed without arguments. Reading it will add computed to the deps of useSelector, createComputed or createEffect.
 - Subscribe to computed by `on` method.
 - Nested computed is allowed.
 

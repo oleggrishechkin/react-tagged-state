@@ -32,7 +32,3 @@ const UserCard = ({ userId }) => {
 ```
 
 Component will be re-rendered anytime when selected value was changed.
-
-## Is useSignal useless?
-
-Short answer - No. We should prefer useSignal for signals and computed. It's faster and clearer.

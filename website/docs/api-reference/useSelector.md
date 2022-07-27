@@ -39,7 +39,7 @@ const UserCard = ({ userId }) => {
 };
 ```
 
-It works well with signals and computed because they are "selectors" too. But you should prefer useSignal for signals and computed - it's cleaner and more performant.
+It works well with signals and computed because they are "selectors" too.
 
 With signal:
 

@@ -14,12 +14,12 @@ Inspired by awesome [SolidJS](https://www.solidjs.com/) and [S.js](https://githu
 ## Basic Usage
 
 ```javascript
-import { createSignal, useSignal } from 'react-tagged-state';
+import { createSignal, useSelector } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
-    const count = useSignal(counter);
+    const count = useSelector(counter);
 
     return <button onClick={() => counter((value) => value + 1)}>{count}</button>;
 };

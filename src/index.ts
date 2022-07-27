@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+
+const noop = () => {};
 
 let clock = {};
 
@@ -13,6 +15,8 @@ const CLOCK = Symbol();
 const SUBSCRIBERS = Symbol();
 
 const SUBSCRIBER = Symbol();
+
+const SUBSCRIBE = Symbol();
 
 export interface Subscriber {
     [CALLBACK]: () => void;
@@ -84,18 +88,6 @@ export const sample = <T>(func: () => T, subscriber: Subscriber | null = null): 
     return value;
 };
 
-const unsubscribe = (subscriber: Subscriber) => {
-    subscriber[SIGNALS].forEach((signal) => {
-        signal[SUBSCRIBERS].delete(subscriber);
-
-        if (SUBSCRIBER in signal && signal[SUBSCRIBERS].size === 0) {
-            unsubscribe((signal as Computed<any>)[SUBSCRIBER]);
-        }
-    });
-    subscriber[SIGNALS] = new Set();
-    subscriber[CLOCK] = clock;
-};
-
 const autoSubscribe = <T>(func: () => T, subscriber: Subscriber) => {
     const previousSignals = subscriber[SIGNALS];
 
@@ -112,7 +104,7 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber) => {
         signal[SUBSCRIBERS].delete(subscriber);
 
         if (SUBSCRIBER in signal && signal[SUBSCRIBERS].size === 0) {
-            unsubscribe((signal as Computed<any>)[SUBSCRIBER]);
+            autoSubscribe(noop, (signal as Computed<any>)[SUBSCRIBER]);
         }
     });
 
@@ -157,7 +149,7 @@ export const createSignal = <T>(initialValue: T): Signal<T> => {
 
                 autoSubscribe(signal, subscriber);
 
-                return () => unsubscribe(subscriber);
+                return () => autoSubscribe(noop, subscriber);
             }
         }
     );
@@ -184,7 +176,7 @@ export const createComputed = <T>(func: () => T): Computed<T> => {
             [SUBSCRIBERS]: new Set<Subscriber>(),
             [SUBSCRIBER]: createSubscriber(() => {
                 if (computed[SUBSCRIBERS].size === 0) {
-                    unsubscribe(computed[SUBSCRIBER]);
+                    autoSubscribe(noop, computed[SUBSCRIBER]);
 
                     return;
                 }
@@ -201,7 +193,7 @@ export const createComputed = <T>(func: () => T): Computed<T> => {
 
                 autoSubscribe(computed, subscriber);
 
-                return () => unsubscribe(subscriber);
+                return () => autoSubscribe(noop, subscriber);
             }
         }
     );
@@ -247,67 +239,55 @@ export const createEffect = (func: () => void | (() => void)): (() => void) => {
             value();
         }
 
-        unsubscribe(subscriber);
+        autoSubscribe(noop, subscriber);
     };
 };
 
-const useIsomorphicLayoutEffect = isSSR ? useEffect : useLayoutEffect;
-
-export const useSyncExternalStoreShim =
+export const useSelector =
     typeof useSyncExternalStore === 'undefined'
-        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T): T => {
-              const value = getSnapshot();
-              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
+        ? <T>(func: () => T): T => {
+              const [state, setState] = useState(() => ({ [SUBSCRIBER]: createSubscriber(noop) }));
+              let value = isSSR ? func() : autoSubscribe(func, state[SUBSCRIBER]);
 
-              useIsomorphicLayoutEffect(() => {
-                  inst.value = value;
-                  inst.getSnapshot = getSnapshot;
+              state[SUBSCRIBER][CALLBACK] = () => {
+                  const nextValue = isSSR ? func() : autoSubscribe(func, state[SUBSCRIBER]);
 
-                  if (inst.value !== inst.getSnapshot()) {
-                      forceUpdate({ inst });
+                  if (nextValue !== value) {
+                      value = nextValue;
+                      setState((state) => ({ [SUBSCRIBER]: state[SUBSCRIBER] }));
                   }
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [subscribe, value, getSnapshot]);
-              useEffect(() => {
-                  if (inst.value !== inst.getSnapshot()) {
-                      forceUpdate({ inst });
-                  }
+              };
 
-                  return subscribe(() => {
-                      if (inst.value !== inst.getSnapshot()) {
-                          forceUpdate({ inst });
-                      }
-                  });
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [subscribe]);
+              useEffect(() => () => autoSubscribe(noop, state[SUBSCRIBER]));
 
               return value;
           }
-        : useSyncExternalStore;
+        : <T>(func: () => T): T => {
+              const ref = useRef<{
+                  [SUBSCRIBER]: Subscriber;
+                  [SUBSCRIBE]: (handleChange: () => void) => () => void;
+              } | null>(null);
 
-export const useSignal = <T>(signal: Signal<T> | Computed<T>): T => useSyncExternalStoreShim(signal.on, signal);
+              if (ref.current === null) {
+                  ref.current = {
+                      [SUBSCRIBER]: createSubscriber(noop),
+                      [SUBSCRIBE]: (handleChange: () => void) => {
+                          ref.current![SUBSCRIBER][CALLBACK] = handleChange;
 
-export const useSelector = <T>(func: () => T): T => {
-    const subscriber = useMemo(() => createSubscriber(() => {}), []);
-    let currentClock: typeof clock;
-    let value: T;
+                          return () => autoSubscribe(noop, ref.current![SUBSCRIBER]);
+                      }
+                  };
+              }
 
-    return useSyncExternalStoreShim(
-        useCallback(
-            (handleChange) => {
-                subscriber[CALLBACK] = handleChange;
+              let currentClock: typeof clock;
+              let value: T;
 
-                return () => unsubscribe(subscriber);
-            },
-            [subscriber]
-        ),
-        () => {
-            if (currentClock !== clock) {
-                currentClock = clock;
-                value = isSSR ? func() : autoSubscribe(func, subscriber);
-            }
+              return useSyncExternalStore(ref.current[SUBSCRIBE], () => {
+                  if (currentClock !== clock) {
+                      currentClock = clock;
+                      value = isSSR ? func() : autoSubscribe(func, ref.current![SUBSCRIBER]);
+                  }
 
-            return value;
-        }
-    );
-};
+                  return value;
+              });
+          };

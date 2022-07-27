@@ -15,8 +15,8 @@ interface Signal<T> {
 ```
 
 - This function is a value container.
-- Read by calling signal without arguments. Reading it will add signal to the deps of useSignal, useSelector, createComputed or createEffect.
-- Write by calling signal with value or updater argument. Writing it will trigger related useSignal, useSelector, computed or createEffect.
+- Read by calling signal without arguments. Reading it will add signal to the deps of useSelector, createComputed or createEffect.
+- Write by calling signal with value or updater argument. Writing it will trigger related useSelector, computed or createEffect.
 - Subscribe to signal by `on` method.
 
 ```typescript
