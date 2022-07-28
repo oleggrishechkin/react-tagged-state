@@ -267,14 +267,6 @@ export const createEffect = (func: () => void | (() => void)): (() => void) => {
     };
 };
 
-const checkIfSnapshotChanged = <T>(inst: { value: T; getSnapshot: () => T }) => {
-    try {
-        return inst.value !== inst.getSnapshot();
-    } catch (error) {
-        return true;
-    }
-};
-
 const useIsomorphicLayoutEffect = isSSR ? useEffect : useLayoutEffect;
 
 const useSyncExternalStoreShim =
@@ -287,17 +279,17 @@ const useSyncExternalStoreShim =
                   inst.value = value;
                   inst.getSnapshot = getSnapshot;
 
-                  if (checkIfSnapshotChanged(inst)) {
+                  if (inst.value !== inst.getSnapshot()) {
                       forceUpdate({ inst });
                   }
               }, [subscribe, value, getSnapshot]);
               useEffect(() => {
-                  if (checkIfSnapshotChanged(inst)) {
+                  if (inst.value !== inst.getSnapshot()) {
                       forceUpdate({ inst });
                   }
 
                   return subscribe(() => {
-                      if (checkIfSnapshotChanged(inst)) {
+                      if (inst.value !== inst.getSnapshot()) {
                           forceUpdate({ inst });
                       }
                   });
@@ -309,8 +301,6 @@ const useSyncExternalStoreShim =
 
 export const useSelector = <T>(func: () => T): T => {
     const subscriber = useMemo(createSubscriber, []);
-    let currentClock: typeof clock;
-    let value: T;
 
     return useSyncExternalStoreShim(
         useCallback(
@@ -321,13 +311,20 @@ export const useSelector = <T>(func: () => T): T => {
             },
             [subscriber]
         ),
-        () => {
-            if (currentClock !== clock) {
+        useMemo(() => {
+            let currentClock: typeof clock;
+            let value: T;
+
+            return () => {
+                if (clock === currentClock) {
+                    return value;
+                }
+
                 currentClock = clock;
                 value = isSSR ? func() : autoSubscribe(func, subscriber);
-            }
 
-            return value;
-        }
+                return value;
+            };
+        }, [func, subscriber])
     );
 };
