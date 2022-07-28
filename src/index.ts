@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-
-const noop = () => {};
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 let clock = {};
 
@@ -16,6 +14,8 @@ const SUBSCRIBERS = Symbol();
 
 const SUBSCRIBER = Symbol();
 
+const VALUE = Symbol();
+
 export interface Subscriber {
     [CALLBACK]: () => void;
     [SIGNALS]: Set<Signal<any> | Computed<any>>;
@@ -26,6 +26,7 @@ export interface Signal<T> {
     (): T;
     (updater: T | ((value: T) => T)): T;
     readonly [SUBSCRIBERS]: Set<Subscriber>;
+    [VALUE]: T;
     on: (callback: (value: T) => void) => () => void;
 }
 
@@ -33,6 +34,7 @@ export interface Computed<T> {
     (): T;
     readonly [SUBSCRIBERS]: Set<Subscriber>;
     readonly [SUBSCRIBER]: Subscriber;
+    [VALUE]: T | null;
     on: (callback: (value: T) => void) => () => void;
 }
 
@@ -51,6 +53,7 @@ export const batch = <T>(func: () => T): T => {
     batchedSignals = new Set();
 
     const value = func();
+
     const signals = batchedSignals;
 
     batchedSignals = null;
@@ -86,6 +89,19 @@ export const sample = <T>(func: () => T, subscriber: Subscriber | null = null): 
     return value;
 };
 
+const unsubscribe = (subscriber: Subscriber) => {
+    subscriber[SIGNALS].forEach((signal) => {
+        signal[SUBSCRIBERS].delete(subscriber);
+
+        if (SUBSCRIBER in signal && signal[SUBSCRIBERS].size === 0) {
+            (signal as Computed<any>)[VALUE] = null;
+            unsubscribe((signal as Computed<any>)[SUBSCRIBER]);
+        }
+    });
+    subscriber[SIGNALS] = new Set();
+    subscriber[CLOCK] = clock;
+};
+
 const autoSubscribe = <T>(func: () => T, subscriber: Subscriber) => {
     const previousSignals = subscriber[SIGNALS];
 
@@ -102,21 +118,21 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber) => {
         signal[SUBSCRIBERS].delete(subscriber);
 
         if (SUBSCRIBER in signal && signal[SUBSCRIBERS].size === 0) {
-            autoSubscribe(noop, (signal as Computed<any>)[SUBSCRIBER]);
+            (signal as Computed<any>)[VALUE] = null;
+            unsubscribe((signal as Computed<any>)[SUBSCRIBER]);
         }
     });
 
     return value;
 };
 
-const createSubscriber = (callback: () => void = noop) => ({
+const createSubscriber = (callback: () => void = () => {}) => ({
     [CALLBACK]: callback,
     [SIGNALS]: new Set<Signal<any> | Computed<any>>(),
     [CLOCK]: clock
 });
 
 export const createSignal = <T>(initialValue: T): Signal<T> => {
-    let value = initialValue;
     const signal = Object.assign(
         (...args: any[]) => {
             if (args.length === 0) {
@@ -125,29 +141,34 @@ export const createSignal = <T>(initialValue: T): Signal<T> => {
                     currentSubscriber[SIGNALS].add(signal);
                 }
 
-                return value;
+                return signal[VALUE];
             }
 
-            const nextValue = typeof args[0] === 'function' ? args[0](value) : args[0];
+            const nextValue = typeof args[0] === 'function' ? args[0](signal[VALUE]) : args[0];
 
-            if (nextValue !== value) {
-                value = nextValue;
+            if (nextValue !== signal[VALUE]) {
+                signal[VALUE] = nextValue;
 
                 if (signal[SUBSCRIBERS].size !== 0) {
-                    batch(() => batchedSignals!.add(signal));
+                    batch(() => {
+                        if (batchedSignals) {
+                            batchedSignals.add(signal);
+                        }
+                    });
                 }
             }
 
-            return value;
+            return signal[VALUE];
         },
         {
             [SUBSCRIBERS]: new Set<Subscriber>(),
+            [VALUE]: initialValue,
             on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(value));
+                const subscriber = createSubscriber(() => callback(signal()));
 
                 autoSubscribe(signal, subscriber);
 
-                return () => autoSubscribe(noop, subscriber);
+                return () => unsubscribe(subscriber);
             }
         }
     );
@@ -156,7 +177,6 @@ export const createSignal = <T>(initialValue: T): Signal<T> => {
 };
 
 export const createComputed = <T>(func: () => T): Computed<T> => {
-    let value: T | null = null;
     const computed = Object.assign(
         () => {
             if (currentSubscriber) {
@@ -164,34 +184,40 @@ export const createComputed = <T>(func: () => T): Computed<T> => {
                 currentSubscriber[SIGNALS].add(computed);
             }
 
-            if (value === null || computed[SUBSCRIBER][SIGNALS].size === 0) {
-                value = autoSubscribe(func, computed[SUBSCRIBER]);
+            if (computed[VALUE] === null || computed[SUBSCRIBER][SIGNALS].size === 0) {
+                computed[VALUE] = autoSubscribe(func, computed[SUBSCRIBER]);
             }
 
-            return value;
+            return computed[VALUE];
         },
         {
             [SUBSCRIBERS]: new Set<Subscriber>(),
             [SUBSCRIBER]: createSubscriber(() => {
                 if (computed[SUBSCRIBERS].size === 0) {
-                    autoSubscribe(noop, computed[SUBSCRIBER]);
+                    computed[VALUE] = null;
+                    unsubscribe(computed[SUBSCRIBER]);
 
                     return;
                 }
 
                 const nextValue = autoSubscribe(func, computed[SUBSCRIBER]);
 
-                if (nextValue !== value) {
-                    value = nextValue;
-                    batch(() => batchedSignals!.add(computed));
+                if (nextValue !== computed[VALUE]) {
+                    computed[VALUE] = nextValue;
+                    batch(() => {
+                        if (batchedSignals) {
+                            batchedSignals.add(computed);
+                        }
+                    });
                 }
             }),
+            [VALUE]: null as T | null,
             on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(value!));
+                const subscriber = createSubscriber(() => callback(computed()));
 
                 autoSubscribe(computed, subscriber);
 
-                return () => autoSubscribe(noop, subscriber);
+                return () => unsubscribe(subscriber);
             }
         }
     );
@@ -237,51 +263,71 @@ export const createEffect = (func: () => void | (() => void)): (() => void) => {
             value();
         }
 
-        autoSubscribe(noop, subscriber);
+        unsubscribe(subscriber);
     };
 };
 
-export const useSelector =
+const checkIfSnapshotChanged = <T>(inst: { value: T; getSnapshot: () => T }) => {
+    try {
+        return inst.value !== inst.getSnapshot();
+    } catch (error) {
+        return true;
+    }
+};
+
+const useIsomorphicLayoutEffect = isSSR ? useEffect : useLayoutEffect;
+
+const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
-        ? <T>(func: () => T): T => {
-              const subscriber = useMemo(createSubscriber, []);
-              const [, forceUpdate] = useState({});
-              let value = isSSR ? func() : autoSubscribe(func, subscriber);
+        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T): T => {
+              const value = getSnapshot();
+              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
 
-              subscriber[CALLBACK] = () => {
-                  const nextValue = isSSR ? func() : autoSubscribe(func, subscriber);
+              useIsomorphicLayoutEffect(() => {
+                  inst.value = value;
+                  inst.getSnapshot = getSnapshot;
 
-                  if (nextValue !== value) {
-                      value = nextValue;
-                      forceUpdate({});
+                  if (checkIfSnapshotChanged(inst)) {
+                      forceUpdate({ inst });
                   }
-              };
+              }, [subscribe, value, getSnapshot]);
+              useEffect(() => {
+                  if (checkIfSnapshotChanged(inst)) {
+                      forceUpdate({ inst });
+                  }
 
-              useEffect(() => () => autoSubscribe(noop, subscriber), [subscriber]);
+                  return subscribe(() => {
+                      if (checkIfSnapshotChanged(inst)) {
+                          forceUpdate({ inst });
+                      }
+                  });
+              }, [inst, subscribe]);
 
               return value;
           }
-        : <T>(func: () => T): T => {
-              const subscriber = useMemo(createSubscriber, []);
-              let currentClock: typeof clock;
-              let value: T;
+        : useSyncExternalStore;
 
-              return useSyncExternalStore(
-                  useCallback(
-                      (handleChange) => {
-                          subscriber[CALLBACK] = handleChange;
+export const useSelector = <T>(func: () => T): T => {
+    const subscriber = useMemo(createSubscriber, []);
+    let currentClock: typeof clock;
+    let value: T;
 
-                          return () => autoSubscribe(noop, subscriber);
-                      },
-                      [subscriber]
-                  ),
-                  () => {
-                      if (currentClock !== clock) {
-                          currentClock = clock;
-                          value = isSSR ? func() : autoSubscribe(func, subscriber);
-                      }
+    return useSyncExternalStoreShim(
+        useCallback(
+            (handleChange) => {
+                subscriber[CALLBACK] = handleChange;
 
-                      return value;
-                  }
-              );
-          };
+                return () => unsubscribe(subscriber);
+            },
+            [subscriber]
+        ),
+        () => {
+            if (currentClock !== clock) {
+                currentClock = clock;
+                value = isSSR ? func() : autoSubscribe(func, subscriber);
+            }
+
+            return value;
+        }
+    );
+};
