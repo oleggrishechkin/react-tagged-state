@@ -1,40 +1,19 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
-let clock = {};
-
-const isSSR = typeof window === 'undefined';
-
-const CALLBACK = Symbol();
-
-const SIGNALS = Symbol();
-
-const CLOCK = Symbol();
-
-const SUBSCRIBERS = Symbol();
-
-const SUBSCRIBER = Symbol();
-
-const VALUE = Symbol();
-
 export interface Subscriber {
-    [CALLBACK]: () => void;
-    [SIGNALS]: Set<Signal<any> | Computed<any>>;
-    [CLOCK]: typeof clock;
+    callback: () => void;
+    cleanups: Set<(subscriber: Subscriber) => void>;
+    clock: typeof clock;
 }
 
 export interface Signal<T> {
     (): T;
     (updater: T | ((value: T) => T)): T;
-    readonly [SUBSCRIBERS]: Set<Subscriber>;
-    [VALUE]: T;
     on: (callback: (value: T) => void) => () => void;
 }
 
 export interface Computed<T> {
     (): T;
-    readonly [SUBSCRIBERS]: Set<Subscriber>;
-    readonly [SUBSCRIBER]: Subscriber;
-    [VALUE]: T | null;
     on: (callback: (value: T) => void) => () => void;
 }
 
@@ -43,29 +22,37 @@ export interface Event<T = void> {
     on: (callback: (value: T) => void) => () => void;
 }
 
-let batchedSignals: Set<Signal<any> | Computed<any>> | null = null;
+const isSSR = typeof window === 'undefined';
+
+const noop = () => {};
+
+let clock = {};
+
+let currentSubscriber: Subscriber | null = null;
+
+let batchedSubscribersSet: Set<Set<Subscriber>> | null = null;
 
 export const batch = <T>(func: () => T): T => {
-    if (batchedSignals) {
+    if (batchedSubscribersSet) {
         return func();
     }
 
-    batchedSignals = new Set();
+    batchedSubscribersSet = new Set();
 
     const value = func();
 
-    const signals = batchedSignals;
+    const subscribersSet = batchedSubscribersSet;
 
-    batchedSignals = null;
+    batchedSubscribersSet = null;
 
-    if (signals.size !== 0) {
+    if (subscribersSet.size) {
         clock = {};
         batch(() =>
-            signals.forEach((signal) =>
-                signal[SUBSCRIBERS].forEach((subscriber) => {
-                    if (subscriber[CLOCK] !== clock) {
-                        subscriber[CLOCK] = clock;
-                        subscriber[CALLBACK]();
+            subscribersSet.forEach((subscribers) =>
+                subscribers.forEach((subscriber) => {
+                    if (subscriber.clock !== clock) {
+                        subscriber.clock = clock;
+                        subscriber.callback();
                     }
                 })
             )
@@ -75,9 +62,22 @@ export const batch = <T>(func: () => T): T => {
     return value;
 };
 
-let currentSubscriber: Subscriber | null = null;
+const createSubscriber = (callback: () => void = noop) => ({
+    callback: callback,
+    cleanups: new Set<(subscriber: Subscriber) => void>(),
+    clock: clock
+});
 
-export const sample = <T>(func: () => T, subscriber: Subscriber | null = null): T => {
+export const compute = <T>(func: () => T, subscriber: Subscriber | null = null): T => {
+    let previousCleanups: Subscriber['cleanups'] = new Set();
+
+    if (subscriber) {
+        previousCleanups = subscriber.cleanups;
+
+        subscriber.cleanups = new Set();
+        subscriber.clock = clock;
+    }
+
     const previousSubscriber = currentSubscriber;
 
     currentSubscriber = subscriber;
@@ -86,184 +86,155 @@ export const sample = <T>(func: () => T, subscriber: Subscriber | null = null): 
 
     currentSubscriber = previousSubscriber;
 
+    if (subscriber) {
+        previousCleanups.forEach((cleanup) => {
+            if (!subscriber.cleanups.has(cleanup)) {
+                cleanup(subscriber);
+            }
+        });
+    }
+
     return value;
 };
 
-const unsubscribe = (subscriber: Subscriber) => {
-    subscriber[SIGNALS].forEach((signal) => {
-        signal[SUBSCRIBERS].delete(subscriber);
+export const createSignal = <T>(
+    initializeValue: T | (() => T)
+): ((...args: [T | ((value: T) => T)] | []) => T) & { on: (callback: (value: T) => void) => () => void } => {
+    let value = typeof initializeValue === 'function' ? (initializeValue as () => T)() : initializeValue;
+    const subscribers = new Set<Subscriber>();
+    const cleanup = (subscriber: Subscriber) => subscribers.delete(subscriber);
+    const subscribe = (callback: (value: T) => void) => {
+        const targetSubscriber = createSubscriber(() => callback(value));
 
-        if (SUBSCRIBER in signal && signal[SUBSCRIBERS].size === 0) {
-            (signal as Computed<any>)[VALUE] = null;
-            unsubscribe((signal as Computed<any>)[SUBSCRIBER]);
+        subscribers.add(targetSubscriber);
+        targetSubscriber.cleanups.add(cleanup);
+
+        return () => compute(noop, targetSubscriber);
+    };
+    const signal = (...args: [T | ((value: T) => T)] | []) => {
+        if (args.length) {
+            const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(value) : args[0];
+
+            if (nextValue !== value) {
+                value = nextValue;
+
+                if (!subscribers.size) {
+                    batch(() => {
+                        if (batchedSubscribersSet) {
+                            batchedSubscribersSet.add(subscribers);
+                        }
+                    });
+                }
+            }
+
+            return value;
         }
-    });
-    subscriber[SIGNALS] = new Set();
-    subscriber[CLOCK] = clock;
+
+        if (currentSubscriber) {
+            subscribers.add(currentSubscriber);
+            currentSubscriber.cleanups.add(cleanup);
+        }
+
+        return value;
+    };
+
+    return Object.assign(signal, { on: subscribe });
 };
 
-const autoSubscribe = <T>(func: () => T, subscriber: Subscriber) => {
-    const previousSignals = subscriber[SIGNALS];
+export const createComputed = <T>(func: () => T): (() => T) & { on: (callback: (value: T) => void) => () => void } => {
+    let value: T | null = null;
+    const subscribers = new Set<Subscriber>();
+    const subscriber = createSubscriber(() => {
+        if (!subscribers.size) {
+            value = null;
+            compute(noop, subscriber);
 
-    subscriber[SIGNALS] = new Set();
-    subscriber[CLOCK] = clock;
-
-    const value = sample(func, subscriber);
-
-    previousSignals.forEach((signal) => {
-        if (subscriber[SIGNALS].has(signal)) {
             return;
         }
 
-        signal[SUBSCRIBERS].delete(subscriber);
+        const nextValue = compute(func, subscriber);
 
-        if (SUBSCRIBER in signal && signal[SUBSCRIBERS].size === 0) {
-            (signal as Computed<any>)[VALUE] = null;
-            unsubscribe((signal as Computed<any>)[SUBSCRIBER]);
+        if (nextValue !== value) {
+            value = nextValue;
+            batch(() => {
+                if (batchedSubscribersSet) {
+                    batchedSubscribersSet.add(subscribers);
+                }
+            });
         }
     });
+    const cleanup = (targetSubscriber: Subscriber) => {
+        subscribers.delete(targetSubscriber);
 
-    return value;
-};
-
-const createSubscriber = (callback: () => void = () => {}) => ({
-    [CALLBACK]: callback,
-    [SIGNALS]: new Set<Signal<any> | Computed<any>>(),
-    [CLOCK]: clock
-});
-
-export const createSignal = <T>(initialValue: T): Signal<T> => {
-    const signal = Object.assign(
-        (...args: any[]) => {
-            if (args.length === 0) {
-                if (currentSubscriber) {
-                    signal[SUBSCRIBERS].add(currentSubscriber);
-                    currentSubscriber[SIGNALS].add(signal);
-                }
-
-                return signal[VALUE];
-            }
-
-            const nextValue = typeof args[0] === 'function' ? args[0](signal[VALUE]) : args[0];
-
-            if (nextValue !== signal[VALUE]) {
-                signal[VALUE] = nextValue;
-
-                if (signal[SUBSCRIBERS].size !== 0) {
-                    batch(() => {
-                        if (batchedSignals) {
-                            batchedSignals.add(signal);
-                        }
-                    });
-                }
-            }
-
-            return signal[VALUE];
-        },
-        {
-            [SUBSCRIBERS]: new Set<Subscriber>(),
-            [VALUE]: initialValue,
-            on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(signal()));
-
-                autoSubscribe(signal, subscriber);
-
-                return () => unsubscribe(subscriber);
-            }
+        if (!subscribers.size) {
+            value = null;
+            compute(noop, subscriber);
         }
-    );
-
-    return signal;
-};
-
-export const createComputed = <T>(func: () => T): Computed<T> => {
-    const computed = Object.assign(
-        () => {
-            if (currentSubscriber) {
-                computed[SUBSCRIBERS].add(currentSubscriber);
-                currentSubscriber[SIGNALS].add(computed);
-            }
-
-            if (computed[VALUE] === null || computed[SUBSCRIBER][SIGNALS].size === 0) {
-                computed[VALUE] = autoSubscribe(func, computed[SUBSCRIBER]);
-            }
-
-            return computed[VALUE];
-        },
-        {
-            [SUBSCRIBERS]: new Set<Subscriber>(),
-            [SUBSCRIBER]: createSubscriber(() => {
-                if (computed[SUBSCRIBERS].size === 0) {
-                    computed[VALUE] = null;
-                    unsubscribe(computed[SUBSCRIBER]);
-
-                    return;
-                }
-
-                const nextValue = autoSubscribe(func, computed[SUBSCRIBER]);
-
-                if (nextValue !== computed[VALUE]) {
-                    computed[VALUE] = nextValue;
-                    batch(() => {
-                        if (batchedSignals) {
-                            batchedSignals.add(computed);
-                        }
-                    });
-                }
-            }),
-            [VALUE]: null as T | null,
-            on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(computed()));
-
-                autoSubscribe(computed, subscriber);
-
-                return () => unsubscribe(subscriber);
-            }
+    };
+    const subscribe = (callback: (value: T) => void) => {
+        if (!subscriber.cleanups.size) {
+            compute(func, subscriber);
         }
-    );
 
-    return computed;
+        const targetSubscriber = createSubscriber(() => callback(value!));
+
+        subscribers.add(targetSubscriber);
+        targetSubscriber.cleanups.add(cleanup);
+
+        return () => compute(noop, targetSubscriber);
+    };
+    const computed = () => {
+        if (currentSubscriber) {
+            subscribers.add(currentSubscriber);
+            currentSubscriber.cleanups.add(cleanup);
+        }
+
+        if (!subscriber.cleanups.size) {
+            value = compute(func, subscriber);
+        }
+
+        return value!;
+    };
+
+    return Object.assign(computed, { on: subscribe });
 };
 
-export const createEvent = <T = void>(): Event<T> => {
+export const createEvent = <T = void>(): ((value: T) => T) & { on: (callback: (value: T) => void) => () => void } => {
     const callbacks = new Set<(value: T) => void>();
+    const subscribe = (callback: (value: T) => void) => {
+        callbacks.add(callback);
 
-    return Object.assign(
-        (value: T) => {
-            batch(() => callbacks.forEach((callback) => callback(value)));
+        return () => {
+            callbacks.delete(callback);
+        };
+    };
+    const event = (value: T) => {
+        batch(() => callbacks.forEach((callback) => callback(value)));
 
-            return value;
-        },
-        {
-            on: (callback: (value: T) => void) => {
-                callbacks.add(callback);
+        return value;
+    };
 
-                return () => {
-                    callbacks.delete(callback);
-                };
-            }
-        }
-    );
+    return Object.assign(event, { on: subscribe });
 };
 
-export const createEffect = (func: () => void | (() => void)): (() => void) => {
+export const effect = (func: () => void | (() => void)): (() => void) => {
     let value: void | (() => void);
     const subscriber = createSubscriber(() => {
         if (typeof value === 'function') {
             value();
         }
 
-        value = autoSubscribe(func, subscriber);
+        value = compute(func, subscriber);
     });
 
-    value = autoSubscribe(() => batch(func), subscriber);
+    value = compute(() => batch(func), subscriber);
 
     return () => {
         if (typeof value === 'function') {
             value();
         }
 
-        unsubscribe(subscriber);
+        compute(noop, subscriber);
     };
 };
 
@@ -271,7 +242,7 @@ const useIsomorphicLayoutEffect = isSSR ? useEffect : useLayoutEffect;
 
 const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
-        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T): T => {
+        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T) => {
               const value = getSnapshot();
               const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
 
@@ -305,9 +276,9 @@ export const useSelector = <T>(func: () => T): T => {
     return useSyncExternalStoreShim(
         useCallback(
             (handleChange) => {
-                subscriber[CALLBACK] = handleChange;
+                subscriber.callback = handleChange;
 
-                return () => unsubscribe(subscriber);
+                return () => compute(noop, subscriber);
             },
             [subscriber]
         ),
@@ -321,7 +292,7 @@ export const useSelector = <T>(func: () => T): T => {
                 }
 
                 currentClock = clock;
-                value = isSSR ? func() : autoSubscribe(func, subscriber);
+                value = isSSR ? func() : compute(func, subscriber);
 
                 return value;
             };
