@@ -118,7 +118,7 @@ export const createSignal = <T>(
             if (nextValue !== value) {
                 value = nextValue;
 
-                if (!subscribers.size) {
+                if (subscribers.size) {
                     batch(() => {
                         if (batchedSubscribersSet) {
                             batchedSubscribersSet.add(subscribers);
@@ -145,23 +145,23 @@ export const createComputed = <T>(func: () => T): (() => T) & { on: (callback: (
     let value: T | null = null;
     const subscribers = new Set<Subscriber>();
     const subscriber = createSubscriber(() => {
-        if (!subscribers.size) {
-            value = null;
-            compute(noop, subscriber);
+        if (subscribers.size) {
+            const nextValue = compute(func, subscriber);
+
+            if (nextValue !== value) {
+                value = nextValue;
+                batch(() => {
+                    if (batchedSubscribersSet) {
+                        batchedSubscribersSet.add(subscribers);
+                    }
+                });
+            }
 
             return;
         }
 
-        const nextValue = compute(func, subscriber);
-
-        if (nextValue !== value) {
-            value = nextValue;
-            batch(() => {
-                if (batchedSubscribersSet) {
-                    batchedSubscribersSet.add(subscribers);
-                }
-            });
-        }
+        value = null;
+        compute(noop, subscriber);
     });
     const cleanup = (targetSubscriber: Subscriber) => {
         subscribers.delete(targetSubscriber);
