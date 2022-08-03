@@ -47,6 +47,8 @@ const scheduleUpdates = <T>(updatedSignal: Signal<T> | Computed<T>) => {
         }
 
         scheduleQueue = new Set([updatedSignal]);
+
+        return;
     }
 
     scheduleQueue = new Set([updatedSignal]);
@@ -360,7 +362,7 @@ export const effect = (func: () => void | (() => void)): (() => void) => {
         value = autoSubscribe(func, subscriber);
     });
 
-    value = autoSubscribe(func, subscriber);
+    subscriber.callback();
 
     return () => {
         if (typeof value === 'function') {
