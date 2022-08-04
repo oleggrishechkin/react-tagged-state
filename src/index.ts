@@ -2,10 +2,13 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 
 let clock = {};
 
+const MAX_RECURSION_COUNT = 1000;
+
 export interface Subscriber {
     callback: () => void;
     signals: Set<Signal<any> | Computed<any>>;
     clock: typeof clock;
+    level: number;
 }
 
 export interface Signal<T> {
@@ -38,37 +41,69 @@ let scheduleQueue: Set<Signal<any> | Computed<any>> | null = null;
 
 let schedulePromise: Promise<void> | null = null;
 
-const scheduleUpdates = <T>(updatedSignal: Signal<T> | Computed<T>) => {
-    if (schedulePromise) {
-        if (scheduleQueue) {
-            scheduleQueue.add(updatedSignal);
+let levelSubs: Set<Subscriber>[] | null = null;
 
-            return;
+const scheduleUpdates = <T>(updatedSignal: Signal<T> | Computed<T>) => {
+    if (levelSubs) {
+        for (const subscriber of updatedSignal.subscribers) {
+            if (levelSubs[subscriber.level]) {
+                levelSubs[subscriber.level].add(subscriber);
+            } else {
+                levelSubs[subscriber.level] = new Set([subscriber]);
+            }
         }
 
-        scheduleQueue = new Set([updatedSignal]);
+        return;
+    }
+
+    if (scheduleQueue) {
+        scheduleQueue.add(updatedSignal);
 
         return;
     }
 
     scheduleQueue = new Set([updatedSignal]);
     schedulePromise = Promise.resolve().then(() => {
-        while (scheduleQueue) {
-            const signals = scheduleQueue;
-
-            scheduleQueue = null;
-            clock = {};
-            signals.forEach((signal) =>
-                signal.subscribers.forEach((subscriber) => {
-                    if (subscriber.clock !== clock) {
-                        subscriber.clock = clock;
-                        subscriber.callback();
-                    }
-                })
-            );
-        }
+        console.time('1');
 
         schedulePromise = null;
+
+        const signals = scheduleQueue!;
+
+        scheduleQueue = null;
+        levelSubs = [];
+
+        for (const signal of signals) {
+            for (const subscriber of signal.subscribers) {
+                if (levelSubs[subscriber.level]) {
+                    levelSubs[subscriber.level].add(subscriber);
+                } else {
+                    levelSubs[subscriber.level] = new Set([subscriber]);
+                }
+            }
+        }
+
+        for (let index = 1; index < levelSubs.length; index++) {
+            if (levelSubs[index]) {
+                for (const subscriber of levelSubs[index]) {
+                    subscriber.callback();
+                }
+            }
+        }
+
+        const subscribers = levelSubs[0];
+
+        levelSubs = null;
+
+        if (subscribers.size) {
+            clock = {};
+
+            for (const subscriber of subscribers) {
+                subscriber.callback();
+            }
+        }
+
+        console.timeEnd('1');
     });
 };
 
@@ -78,36 +113,48 @@ export const flush = async (): Promise<void> => {
     }
 };
 
-const createSubscriber = (callback: () => void = () => {}) => ({
+const createSubscriber = (callback: () => void = () => {}, level = 0) => ({
     callback,
     signals: new Set<Signal<any> | Computed<any>>(),
-    clock
+    clock,
+    level
 });
 
-let unsubscribeQueue: Set<Subscriber> | null = null;
+let unsubscribeQueue: Subscriber[] | null = null;
 
 const unsubscribe = (subscriber: Subscriber) => {
     if (unsubscribeQueue) {
-        unsubscribeQueue.add(subscriber);
+        unsubscribeQueue.push(subscriber);
 
         return;
     }
 
-    unsubscribeQueue = new Set([subscriber]);
-    unsubscribeQueue.forEach((subscriber) => {
-        subscriber.signals.forEach((signal) => {
-            signal.subscribers.delete(subscriber);
+    console.time('2');
+
+    unsubscribeQueue = [subscriber];
+
+    for (let index = 0; index < unsubscribeQueue.length; index++) {
+        for (const signal of unsubscribeQueue[index].signals) {
+            signal.subscribers.delete(unsubscribeQueue[index]);
 
             if ('subscriber' in signal && !signal.subscribers.size) {
                 signal.value = null;
                 signal.hasValue = false;
                 unsubscribe(signal.subscriber);
             }
-        });
-        subscriber.signals = new Set();
-        subscriber.clock = clock;
-    });
+        }
+
+        unsubscribeQueue[index].signals = new Set();
+        unsubscribeQueue[index].clock = clock;
+
+        if (unsubscribeQueue[index].level > 1) {
+            unsubscribeQueue[index].level = 1;
+        }
+    }
+
     unsubscribeQueue = null;
+
+    console.timeEnd('2');
 };
 
 export const sample = <T>(func: () => T): T => {
@@ -128,6 +175,10 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
     subscriber.signals = new Set();
     subscriber.clock = clock;
 
+    if (subscriber.level > 0) {
+        subscriber.level = 1;
+    }
+
     const prevSubscriber = currentSubscriber;
 
     currentSubscriber = subscriber;
@@ -135,19 +186,18 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
     const value = func();
 
     currentSubscriber = prevSubscriber;
-    prevSignals.forEach((signal) => {
-        if (subscriber.signals.has(signal)) {
-            return;
-        }
 
-        signal.subscribers.delete(subscriber);
+    for (const signal of prevSignals) {
+        if (!subscriber.signals.has(signal)) {
+            signal.subscribers.delete(subscriber);
 
-        if ('subscriber' in signal && !signal.subscribers.size) {
-            signal.value = null;
-            signal.hasValue = false;
-            unsubscribe(signal.subscriber);
+            if ('subscriber' in signal && !signal.subscribers.size) {
+                signal.value = null;
+                signal.hasValue = false;
+                unsubscribe(signal.subscriber);
+            }
         }
-    });
+    }
 
     return value;
 };
@@ -180,9 +230,10 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
             subscribers: new Set<Subscriber>(),
             value: typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue,
             on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(autoSubscribe(signal, subscriber)));
+                const subscriber = createSubscriber(() => callback(signal.value));
 
-                autoSubscribe(signal, subscriber);
+                signal.subscribers.add(subscriber);
+                subscriber.signals.add(signal);
 
                 return () => unsubscribe(subscriber);
             }
@@ -197,7 +248,7 @@ let computeQueue: (Computed<any> | null)[] | null = null;
 let recursionCount = 0;
 
 const compute = <T>(computed: Computed<T>) => {
-    if (recursionCount < 1000) {
+    if (recursionCount < MAX_RECURSION_COUNT) {
         recursionCount++;
         computed.value = autoSubscribe(computed.func, computed.subscriber);
         computed.hasValue = true;
@@ -213,46 +264,43 @@ const compute = <T>(computed: Computed<T>) => {
         return;
     }
 
+    console.time('3');
+
     // eslint-disable-next-line no-constant-condition
     while (true) {
         computeQueue = [];
 
         const value = autoSubscribe(computed.func, computed.subscriber);
 
-        if (computeQueue.length === 0) {
+        if (!computeQueue.length) {
             computed.value = value;
             computed.hasValue = true;
             computeQueue = null;
             recursionCount = 0;
+            console.timeEnd('3');
 
             return;
         }
 
         for (let index = 0; index < computeQueue.length; index++) {
-            const item = computeQueue[index];
+            const length = computeQueue.length;
+            const value = autoSubscribe(computeQueue[index]!.func, computeQueue[index]!.subscriber);
 
-            if (item) {
-                const length = computeQueue.length;
-                const value = autoSubscribe(item.func, item.subscriber);
-
-                if (computeQueue.length === length) {
-                    item.value = value;
-                    item.hasValue = true;
-                    computeQueue[index] = null;
-                }
+            if (computeQueue.length === length) {
+                computeQueue[index]!.value = value;
+                computeQueue[index]!.hasValue = true;
+                computeQueue[index] = null;
             }
         }
 
         for (let index = computeQueue.length - 2; index > -1; index--) {
-            const item = computeQueue[index];
-
-            if (item) {
+            if (computeQueue[index]) {
                 const length = computeQueue.length;
-                const value = autoSubscribe(item.func, item.subscriber);
+                const value = autoSubscribe(computeQueue[index]!.func, computeQueue[index]!.subscriber);
 
                 if (computeQueue.length === length) {
-                    item.value = value;
-                    item.hasValue = true;
+                    computeQueue[index]!.value = value;
+                    computeQueue[index]!.hasValue = true;
                 }
             }
         }
@@ -262,13 +310,20 @@ const compute = <T>(computed: Computed<T>) => {
 export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
     const computed = Object.assign(
         () => {
+            if (!computed.hasValue) {
+                compute(computed);
+            }
+
             if (currentSubscriber) {
                 computed.subscribers.add(currentSubscriber);
                 currentSubscriber.signals.add(computed);
-            }
 
-            if (!computed.hasValue) {
-                compute(computed);
+                if (currentSubscriber.level > 0) {
+                    currentSubscriber.level =
+                        currentSubscriber.level > computed.subscriber.level
+                            ? currentSubscriber.level
+                            : computed.subscriber.level + 1;
+                }
             }
 
             return computed.hasValue ? computed.value! : fallback;
@@ -290,12 +345,12 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
                 computed.value = null;
                 computed.hasValue = false;
                 unsubscribe(computed.subscriber);
-            }),
+            }, 1),
             value: null as T | null,
             hasValue: false,
             func,
             on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(autoSubscribe(computed, subscriber)));
+                const subscriber = createSubscriber(() => callback(computed.value!));
 
                 autoSubscribe(computed, subscriber);
 
@@ -310,7 +365,9 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
 export const createEvent = <T = void>(): Event<T> => {
     const event = Object.assign(
         (value: T) => {
-            event.callbacks.forEach((callback) => callback(value));
+            for (const callback of event.callbacks) {
+                callback(value);
+            }
 
             return value;
         },
@@ -362,7 +419,7 @@ export const effect = (func: () => void | (() => void)): (() => void) => {
         value = autoSubscribe(func, subscriber);
     });
 
-    subscriber.callback();
+    value = autoSubscribe(func, subscriber);
 
     return () => {
         if (typeof value === 'function') {
@@ -377,40 +434,48 @@ export const useSelector =
     typeof useSyncExternalStore === 'undefined'
         ? <T>(func: () => T): T => {
               const [{ subscriber }, setState] = useState(() => ({ subscriber: createSubscriber() }));
-              let value = autoSubscribe(func, subscriber);
 
-              subscriber.callback = () => {
-                  const nextValue = autoSubscribe(func, subscriber);
+              useEffect(() => () => unsubscribe(subscriber), [subscriber]);
 
-                  if (nextValue !== value) {
-                      value = nextValue;
-                      setState({ subscriber });
-                  }
-              };
-              // eslint-disable-next-line react-hooks/exhaustive-deps
-              useEffect(() => () => unsubscribe(subscriber), []);
+              return useMemo(() => {
+                  let value = autoSubscribe(func, subscriber);
 
-              return value;
+                  subscriber.callback = () => {
+                      const nextValue = autoSubscribe(func, subscriber);
+
+                      if (nextValue !== value) {
+                          value = nextValue;
+                          setState({ subscriber });
+                      }
+                  };
+
+                  return value;
+              }, [func, subscriber]);
           }
         : <T>(func: () => T): T => {
               const subscriber = useMemo(createSubscriber, []);
-              let currentClock: typeof clock;
-              let value: T;
 
               return useSyncExternalStore(
-                  useCallback((handleChange) => {
-                      subscriber.callback = handleChange;
+                  useCallback(
+                      (handleChange) => {
+                          subscriber.callback = handleChange;
 
-                      return () => unsubscribe(subscriber);
-                      // eslint-disable-next-line react-hooks/exhaustive-deps
-                  }, []),
-                  () => {
-                      if (clock !== currentClock) {
-                          currentClock = clock;
-                          value = autoSubscribe(func, subscriber);
-                      }
+                          return () => unsubscribe(subscriber);
+                      },
+                      [subscriber]
+                  ),
+                  useMemo(() => {
+                      let currentClock: typeof clock;
+                      let value: T;
 
-                      return value;
-                  }
+                      return () => {
+                          if (clock !== currentClock) {
+                              currentClock = clock;
+                              value = autoSubscribe(func, subscriber);
+                          }
+
+                          return value;
+                      };
+                  }, [func, subscriber])
               );
           };
