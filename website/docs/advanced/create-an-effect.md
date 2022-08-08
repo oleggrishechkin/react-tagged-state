@@ -8,17 +8,17 @@ Effect is a subscription with deps auto tracking. It will be called immediately 
 
 ## Run
 
-We need to just call createEffect with callback for running an effect:
+We need to just call effect with callback for running an effect:
 
 ```typescript
 import {
   createSignal,
-  createEffect
+  effect
 } from 'react-tagged-state';
 
 const counter = createSignal(100);
 
-const cleanup = createEffect(() =>
+const cleanup = effect(() =>
   console.log(`counter: ${counter()}`)
 );
 
@@ -27,17 +27,17 @@ const cleanup = createEffect(() =>
 
 ## Cleanup
 
-createEffect returns cleanup function, just call it:
+effect returns cleanup function, just call it:
 
 ```typescript
 import {
   createSignal,
-  createEffect
+  effect
 } from 'react-tagged-state';
 
 const counter = createSignal(100);
 
-const cleanup = createEffect(() =>
+const cleanup = effect(() =>
   console.log(`counter: ${counter()}`)
 );
 

@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
-let clock = {};
-
-const MAX_RECURSION_COUNT = 1000;
-
 export interface Subscriber {
     callback: () => void;
     signals: Set<Signal<any> | Computed<any>>;
-    clock: typeof clock;
+    clock: Record<string, never>;
     level: number;
 }
 
@@ -15,7 +11,9 @@ export interface Signal<T> {
     (): T;
     (updater: T | ((value: T) => T)): T;
     readonly subscribers: Set<Subscriber>;
-    value: T;
+    value: T | null;
+    hasValue: boolean;
+    readonly initialValue: T | (() => T);
     readonly on: (callback: (value: T) => void) => () => void;
 }
 
@@ -26,6 +24,7 @@ export interface Computed<T> {
     value: T | null;
     hasValue: boolean;
     readonly func: () => T;
+    readonly fallback: T;
     readonly on: (callback: (value: T) => void) => () => void;
 }
 
@@ -34,6 +33,8 @@ export interface Event<T> {
     readonly callbacks: Set<(value: T) => void>;
     readonly on: (callback: (value: T) => void) => () => void;
 }
+
+let clock = {};
 
 let currentSubscriber: Subscriber | null = null;
 
@@ -64,12 +65,9 @@ const scheduleUpdates = <T>(updatedSignal: Signal<T> | Computed<T>) => {
 
     scheduleQueue = new Set([updatedSignal]);
     schedulePromise = Promise.resolve().then(() => {
-        console.time('1');
-
-        schedulePromise = null;
-
         const signals = scheduleQueue!;
 
+        schedulePromise = null;
         scheduleQueue = null;
         levelSubs = [];
 
@@ -95,15 +93,13 @@ const scheduleUpdates = <T>(updatedSignal: Signal<T> | Computed<T>) => {
 
         levelSubs = null;
 
-        if (subscribers.size) {
+        if (subscribers) {
             clock = {};
 
             for (const subscriber of subscribers) {
                 subscriber.callback();
             }
         }
-
-        console.timeEnd('1');
     });
 };
 
@@ -129,8 +125,6 @@ const unsubscribe = (subscriber: Subscriber) => {
         return;
     }
 
-    console.time('2');
-
     unsubscribeQueue = [subscriber];
 
     for (let index = 0; index < unsubscribeQueue.length; index++) {
@@ -153,8 +147,6 @@ const unsubscribe = (subscriber: Subscriber) => {
     }
 
     unsubscribeQueue = null;
-
-    console.timeEnd('2');
 };
 
 export const sample = <T>(func: () => T): T => {
@@ -175,7 +167,7 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
     subscriber.signals = new Set();
     subscriber.clock = clock;
 
-    if (subscriber.level > 0) {
+    if (subscriber.level > 1) {
         subscriber.level = 1;
     }
 
@@ -205,8 +197,16 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
 export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
     const signal = Object.assign(
         (...args: [T | ((value: T) => T)] | []) => {
+            if (!signal.hasValue) {
+                signal.value =
+                    typeof signal.initialValue === 'function'
+                        ? (signal.initialValue as () => T)()
+                        : signal.initialValue;
+                signal.hasValue = true;
+            }
+
             if (args.length) {
-                const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(signal.value) : args[0];
+                const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(signal.value!) : args[0];
 
                 if (nextValue !== signal.value) {
                     signal.value = nextValue;
@@ -224,16 +224,17 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
                 currentSubscriber.signals.add(signal);
             }
 
-            return signal.value;
+            return signal.value!;
         },
         {
             subscribers: new Set<Subscriber>(),
-            value: typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue,
+            value: null as T | null,
+            hasValue: false,
+            initialValue,
             on: (callback: (value: T) => void) => {
-                const subscriber = createSubscriber(() => callback(signal.value));
+                const subscriber = createSubscriber(() => callback(signal.value!));
 
-                signal.subscribers.add(subscriber);
-                subscriber.signals.add(signal);
+                autoSubscribe(signal, subscriber);
 
                 return () => unsubscribe(subscriber);
             }
@@ -248,7 +249,7 @@ let computeQueue: (Computed<any> | null)[] | null = null;
 let recursionCount = 0;
 
 const compute = <T>(computed: Computed<T>) => {
-    if (recursionCount < MAX_RECURSION_COUNT) {
+    if (recursionCount < 1000) {
         recursionCount++;
         computed.value = autoSubscribe(computed.func, computed.subscriber);
         computed.hasValue = true;
@@ -264,8 +265,6 @@ const compute = <T>(computed: Computed<T>) => {
         return;
     }
 
-    console.time('3');
-
     // eslint-disable-next-line no-constant-condition
     while (true) {
         computeQueue = [];
@@ -277,7 +276,6 @@ const compute = <T>(computed: Computed<T>) => {
             computed.hasValue = true;
             computeQueue = null;
             recursionCount = 0;
-            console.timeEnd('3');
 
             return;
         }
@@ -326,7 +324,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
                 }
             }
 
-            return computed.hasValue ? computed.value! : fallback;
+            return computed.hasValue ? computed.value! : computed.fallback;
         },
         {
             subscribers: new Set<Subscriber>(),
@@ -349,6 +347,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             value: null as T | null,
             hasValue: false,
             func,
+            fallback,
             on: (callback: (value: T) => void) => {
                 const subscriber = createSubscriber(() => callback(computed.value!));
 

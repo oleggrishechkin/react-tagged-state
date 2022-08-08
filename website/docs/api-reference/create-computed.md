@@ -6,7 +6,7 @@ sidebar_position: 3
 
 ```typescript
 interface createComputed {
-  <T>(func: () => T): Computed<T>;
+  <T>(func: () => T, fallback: T): Computed<T>;
 }
 ```
 
@@ -22,5 +22,5 @@ const counter = createSignal(100);
 
 const roundedCounter = createComputed(() =>
   Math.floor(counter() / 10)
-);
+, 0);
 ```

@@ -5,7 +5,7 @@ sidebar_position: 7
 # createEffect
 
 ```typescript
-interface createEffect {
+interface effect {
   (func: () => void | (() => void)): () => void;
 }
 ```
@@ -18,7 +18,7 @@ You can return function from `func`. It will be called before next `func` or cle
 import {
   createSignal,
   createComputed,
-  createEffect
+  effect
 } from 'react-tagged-state';
 
 const counter = createSignal(10);
@@ -27,7 +27,7 @@ const roundedCounter = createComputed(() =>
   Math.floor(counter() / 10)
 );
 
-const cleanup = createEffect(() => {
+const cleanup = effect(() => {
   console.log(`counter: ${counter()}`);
   console.log(
     `roundedCounter: ${roundedCounter()}`
