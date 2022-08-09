@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 
 export interface Subscriber {
     callback: () => void;
     signals: Set<Signal<any> | Computed<any>>;
+    clock: number;
     level: number;
 }
 
@@ -28,15 +29,26 @@ let schedulePromise: Promise<void> | null = null;
 
 let scheduleQueue: Set<Set<Subscriber>> | null = null;
 
-let scheduleSubscribersByLevel: Set<Subscriber>[] | null = null;
+let scheduleSubscribersByLevel: Subscriber[][] | null = null;
+
+const runSubscribers = (subscribers?: Subscriber[]) => {
+    if (subscribers) {
+        for (let index = 0; index < subscribers.length; index++) {
+            if (subscribers[index].clock !== clock) {
+                subscribers[index].clock = clock;
+                subscribers[index].callback();
+            }
+        }
+    }
+};
 
 const scheduleUpdates = (subscribers: Set<Subscriber>) => {
     if (scheduleSubscribersByLevel) {
         for (const subscriber of subscribers) {
             if (scheduleSubscribersByLevel[subscriber.level]) {
-                scheduleSubscribersByLevel[subscriber.level].add(subscriber);
+                scheduleSubscribersByLevel[subscriber.level].push(subscriber);
             } else {
-                scheduleSubscribersByLevel[subscriber.level] = new Set([subscriber]);
+                scheduleSubscribersByLevel[subscriber.level] = [subscriber];
             }
         }
 
@@ -51,36 +63,24 @@ const scheduleUpdates = (subscribers: Set<Subscriber>) => {
 
     scheduleQueue = new Set([subscribers]);
     schedulePromise = Promise.resolve().then(() => {
-        console.time('1');
-
+        clock++;
+        schedulePromise = null;
         scheduleSubscribersByLevel = [];
 
         for (const subscribers of scheduleQueue!) {
             scheduleUpdates(subscribers);
         }
 
+        scheduleQueue = null;
+
         for (let index = 1; index < scheduleSubscribersByLevel.length; index++) {
-            if (scheduleSubscribersByLevel[index]) {
-                for (const subscriber of scheduleSubscribersByLevel[index]) {
-                    subscriber.callback();
-                }
-            }
+            runSubscribers(scheduleSubscribersByLevel[index]);
         }
 
         const subscribers = scheduleSubscribersByLevel[0];
 
-        schedulePromise = null;
-        scheduleQueue = null;
         scheduleSubscribersByLevel = null;
-        clock++;
-
-        if (subscribers) {
-            for (const subscriber of subscribers) {
-                subscriber.callback();
-            }
-        }
-
-        console.timeEnd('1');
+        runSubscribers(subscribers);
     });
 };
 
@@ -93,20 +93,13 @@ export const flush = async (): Promise<void> => {
 const createSubscriber = (callback: () => void = () => {}, level = 0) => ({
     callback,
     signals: new Set<Signal<any> | Computed<any>>(),
+    clock,
     level
 });
 
 let subscriberToDelete: Subscriber | null = null;
 
 let unsubscribeQueue: Subscriber[] | null = null;
-
-const resetSubscriber = (subscriber: Subscriber) => {
-    subscriber.signals = new Set();
-
-    if (subscriber.level > 1) {
-        subscriber.level = 1;
-    }
-};
 
 const unsubscribe = (subscriber: Subscriber) => {
     if (unsubscribeQueue) {
@@ -117,18 +110,16 @@ const unsubscribe = (subscriber: Subscriber) => {
 
     unsubscribeQueue = [subscriber];
 
-    console.time('2');
-
     for (let index = 0; index < unsubscribeQueue.length; index++) {
         for (const signal of unsubscribeQueue[index].signals) {
             subscriberToDelete = unsubscribeQueue[index];
             signal();
         }
 
-        resetSubscriber(subscriber);
+        unsubscribeQueue[index].signals = new Set();
+        unsubscribeQueue[index].clock = clock;
+        unsubscribeQueue[index].level = unsubscribeQueue[index].level && 1;
     }
-
-    console.timeEnd('2');
 
     unsubscribeQueue = null;
 };
@@ -138,7 +129,9 @@ let subscriberToAdd: Subscriber | null = null;
 const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
     const prevSignals = subscriber.signals;
 
-    resetSubscriber(subscriber);
+    subscriber.signals = new Set();
+    subscriber.clock = clock;
+    subscriber.level = subscriber.level && 1;
 
     const prevSubscriber = subscriberToAdd;
 
@@ -235,8 +228,6 @@ const compute = <T>(computed: Computed<T>) => {
         return;
     }
 
-    console.time('3');
-
     // eslint-disable-next-line no-constant-condition
     while (true) {
         computeQueue = [];
@@ -245,8 +236,6 @@ const compute = <T>(computed: Computed<T>) => {
 
         if (!computeQueue.length) {
             computeQueue = null;
-
-            console.timeEnd('3');
 
             return;
         }
@@ -331,11 +320,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
         if (subscriberToAdd) {
             subscribers.add(subscriberToAdd);
             subscriberToAdd.signals.add(computed);
-
-            if (subscriberToAdd.level > 0) {
-                subscriberToAdd.level =
-                    subscriberToAdd.level > subscriber.level ? subscriberToAdd.level : subscriber.level + 1;
-            }
+            subscriberToAdd.level = subscriberToAdd.level && Math.max(subscriberToAdd.level, subscriber.level + 1);
         }
 
         return hasValue ? value! : fallback;
