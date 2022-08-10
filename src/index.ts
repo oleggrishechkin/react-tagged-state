@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore } from 'react';
 
 export interface Subscriber {
     callback: () => void;
@@ -90,12 +90,18 @@ export const flush = async (): Promise<void> => {
     }
 };
 
-const createSubscriber = (callback: () => void = () => {}, level = 0) => ({
+const createSubscriber = (callback: () => void = () => {}, level: 0 | 1 = 0) => ({
     callback,
     signals: new Set<Signal<any> | Computed<any>>(),
     clock,
     level
 });
+
+const resetSubscriber = (subscriber: Subscriber) => {
+    subscriber.signals = new Set();
+    subscriber.clock = clock;
+    subscriber.level = subscriber.level && 1;
+};
 
 let subscriberToDelete: Subscriber | null = null;
 
@@ -116,9 +122,7 @@ const unsubscribe = (subscriber: Subscriber) => {
             signal();
         }
 
-        unsubscribeQueue[index].signals = new Set();
-        unsubscribeQueue[index].clock = clock;
-        unsubscribeQueue[index].level = unsubscribeQueue[index].level && 1;
+        resetSubscriber(unsubscribeQueue[index]);
     }
 
     unsubscribeQueue = null;
@@ -129,9 +133,7 @@ let subscriberToAdd: Subscriber | null = null;
 const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
     const prevSignals = subscriber.signals;
 
-    subscriber.signals = new Set();
-    subscriber.clock = clock;
-    subscriber.level = subscriber.level && 1;
+    resetSubscriber(subscriber);
 
     const prevSubscriber = subscriberToAdd;
 
@@ -379,53 +381,63 @@ export const effect = (func: () => void | (() => void)): (() => void) => {
     };
 };
 
-export const useSelector =
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+
+const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
-        ? <T>(func: () => T): T => {
-              const [[subscriber], setState] = useState(() => [createSubscriber()]);
+        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T): T => {
+              const value = getSnapshot();
+              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
 
-              // eslint-disable-next-line react-hooks/exhaustive-deps
-              useEffect(() => () => unsubscribe(subscriber), []);
+              useIsomorphicLayoutEffect(() => {
+                  inst.value = value;
+                  inst.getSnapshot = getSnapshot;
 
-              return useMemo(() => {
-                  let value = autoSubscribe(func, subscriber);
+                  if (inst.value !== inst.getSnapshot()) {
+                      forceUpdate({ inst });
+                  }
+              }, [subscribe, value, getSnapshot]);
+              useEffect(() => {
+                  if (inst.value !== inst.getSnapshot()) {
+                      forceUpdate({ inst });
+                  }
 
-                  subscriber.callback = () => {
-                      const nextValue = autoSubscribe(func, subscriber);
-
-                      if (nextValue !== value) {
-                          value = nextValue;
-                          setState([subscriber]);
+                  return subscribe(() => {
+                      if (inst.value !== inst.getSnapshot()) {
+                          forceUpdate({ inst });
                       }
-                  };
+                  });
+              }, [inst, subscribe]);
 
-                  return value;
-                  // eslint-disable-next-line react-hooks/exhaustive-deps
-              }, [func]);
+              return value;
           }
-        : <T>(func: () => T): T => {
-              const subscriber = useMemo(createSubscriber, []);
+        : useSyncExternalStore;
 
-              return useSyncExternalStore(
-                  useCallback((handleChange) => {
-                      subscriber.callback = handleChange;
+export const useSignal = <T>(signal: Signal<T> | Computed<T>): T => useSyncExternalStoreShim(signal.on, signal);
 
-                      return () => unsubscribe(subscriber);
-                      // eslint-disable-next-line react-hooks/exhaustive-deps
-                  }, []),
-                  useMemo(() => {
-                      let currentClock: typeof clock;
-                      let value: T;
+export const useSelector = <T>(func: () => T): T => {
+    const subscriber = useMemo(createSubscriber, []);
 
-                      return () => {
-                          if (clock !== currentClock) {
-                              currentClock = clock;
-                              value = autoSubscribe(func, subscriber);
-                          }
+    return useSyncExternalStoreShim(
+        useCallback((handleChange) => {
+            subscriber.callback = handleChange;
 
-                          return value;
-                      };
-                      // eslint-disable-next-line react-hooks/exhaustive-deps
-                  }, [func])
-              );
-          };
+            return () => unsubscribe(subscriber);
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, []),
+        useMemo(() => {
+            let currentClock: typeof clock;
+            let value: T;
+
+            return () => {
+                if (clock !== currentClock) {
+                    currentClock = clock;
+                    value = autoSubscribe(func, subscriber);
+                }
+
+                return value;
+            };
+            // eslint-disable-next-line react-hooks/exhaustive-deps
+        }, [func])
+    );
+};
