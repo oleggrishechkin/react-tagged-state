@@ -255,7 +255,7 @@ const compute = <T>(computed: Computed<T>) => {
 };
 
 export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
-    let value: T | null = null;
+    let value: T = fallback;
     let hasValue = false;
     const subscribers = new Set<Subscriber>();
     const subscriber = createSubscriber(() => {
@@ -270,7 +270,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             return;
         }
 
-        value = null;
+        value = fallback;
         hasValue = false;
         unsubscribe(subscriber);
     }, 1);
@@ -279,7 +279,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             tryToCompute = false;
 
             if (hasValue) {
-                return value!;
+                return value;
             }
 
             if (computeQueue) {
@@ -305,10 +305,10 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             subscriberToDelete = null;
 
             if (subscribers.size) {
-                return value!;
+                return value;
             }
 
-            value = null;
+            value = fallback;
             hasValue = false;
             unsubscribe(subscriber);
 
@@ -325,7 +325,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             subscriberToAdd.level = subscriberToAdd.level && Math.max(subscriberToAdd.level, subscriber.level + 1);
         }
 
-        return hasValue ? value! : fallback;
+        return value;
     };
 
     computed.on = (callback: (value: T) => void) => {
