@@ -23,6 +23,10 @@ export interface Event<T> {
     readonly on: (callback: (value: T) => void) => () => void;
 }
 
+const isSSR = typeof window === 'undefined';
+
+const noop = () => {};
+
 let clock = 0;
 
 let schedulePromise: Promise<void> | null = null;
@@ -86,7 +90,7 @@ export const flush = async (): Promise<void> => {
     }
 };
 
-const createSubscriber = (callback: () => void = () => {}, level: 0 | 1 = 0) => ({
+const createSubscriber = (callback: () => void = noop, level: 0 | 1 = 0) => ({
     callback,
     signals: new Set<Signal<any> | Computed<any>>(),
     clock,
@@ -123,6 +127,10 @@ const unsubscribe = (subscriber: Subscriber) => {
 let runAddSubscriber: Subscriber | null = null;
 
 const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
+    if (isSSR) {
+        return func();
+    }
+
     const prevSignals = subscriber.signals;
 
     subscriber.signals = new Set();
@@ -159,6 +167,33 @@ export const sample = <T>(func: () => T): T => {
     return value;
 };
 
+export const createEvent = <T = void>({ ssr }: { ssr?: boolean } = {}): Event<T> => {
+    const callbacks = new Set<(value: T) => void>();
+    const event = (value: T) => {
+        for (const callback of callbacks) {
+            callback(value);
+        }
+
+        return value;
+    };
+
+    event.on = (callback: (value: T) => void) => {
+        if (isSSR && !ssr) {
+            return noop;
+        }
+
+        callbacks.add(callback);
+
+        return () => {
+            callbacks.delete(callback);
+        };
+    };
+
+    return event;
+};
+
+export const reset = createEvent<void | Signal<any> | Computed<any>>({ ssr: true });
+
 export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
     let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
     const subscribers = new Set<Subscriber>();
@@ -193,12 +228,21 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
     };
 
     signal.on = (callback: (value: T) => void) => {
+        if (isSSR) {
+            return noop;
+        }
+
         const subscriber = createSubscriber(() => callback(autoSubscribe(signal, subscriber)));
 
         autoSubscribe(signal, subscriber);
 
         return () => unsubscribe(subscriber);
     };
+    reset.on((signalToReset) => {
+        if (!signalToReset || signalToReset === signal) {
+            signal(typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue);
+        }
+    });
 
     return signal;
 };
@@ -316,6 +360,10 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
     };
 
     computed.on = (callback: (value: T) => void) => {
+        if (isSSR) {
+            return noop;
+        }
+
         const subscriber = createSubscriber(() => callback(autoSubscribe(computed, subscriber)));
 
         autoSubscribe(computed, subscriber);
@@ -326,28 +374,11 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
     return computed;
 };
 
-export const createEvent = <T = void>(): Event<T> => {
-    const callbacks = new Set<(value: T) => void>();
-    const event = (value: T) => {
-        for (const callback of callbacks) {
-            callback(value);
-        }
-
-        return value;
-    };
-
-    event.on = (callback: (value: T) => void) => {
-        callbacks.add(callback);
-
-        return () => {
-            callbacks.delete(callback);
-        };
-    };
-
-    return event;
-};
-
 export const createEffect = (func: () => void | (() => void)): (() => void) => {
+    if (isSSR) {
+        return noop;
+    }
+
     let value: void | (() => void);
     const subscriber = createSubscriber(() => {
         if (typeof value === 'function') {
@@ -368,7 +399,7 @@ export const createEffect = (func: () => void | (() => void)): (() => void) => {
     };
 };
 
-const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+const useIsomorphicLayoutEffect = isSSR ? useEffect : useLayoutEffect;
 
 const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
@@ -427,4 +458,21 @@ export const useSelector = <T>(func: () => T): T => {
             // eslint-disable-next-line react-hooks/exhaustive-deps
         }, [func])
     );
+};
+
+export const useResetSignals = (): void => {
+    if (isSSR) {
+        reset();
+    }
+};
+
+export const useHydrateSignal = <T>(
+    signal: Signal<T>,
+    hydratedValue: T,
+    merge?: (currentValue: T, hydratedValue: T) => T
+): void => {
+    useMemo(() => {
+        signal(merge ? (currentValue) => merge(currentValue, hydratedValue) : hydratedValue);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [hydratedValue, signal]);
 };
