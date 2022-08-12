@@ -27,65 +27,61 @@ let clock = 0;
 
 let schedulePromise: Promise<void> | null = null;
 
-let scheduleQueue: Set<Set<Subscriber>> | null = null;
+let scheduleQueue: Subscriber[][] | null = null;
 
-let scheduleSubscribersByLevel: Subscriber[][] | null = null;
+const schedule = (subscribers: Set<Subscriber>) => {
+    if (!scheduleQueue) {
+        scheduleQueue = [];
+    }
 
-const runSubscribers = (subscribers?: Subscriber[]) => {
-    if (subscribers) {
-        for (let index = 0; index < subscribers.length; index++) {
-            if (subscribers[index].clock !== clock) {
-                subscribers[index].clock = clock;
-                subscribers[index].callback();
-            }
+    for (const subscriber of subscribers) {
+        if (scheduleQueue[subscriber.level]) {
+            scheduleQueue[subscriber.level].push(subscriber);
+        } else {
+            scheduleQueue[subscriber.level] = [subscriber];
         }
     }
-};
 
-const scheduleUpdates = (subscribers: Set<Subscriber>) => {
-    if (scheduleSubscribersByLevel) {
-        for (const subscriber of subscribers) {
-            if (scheduleSubscribersByLevel[subscriber.level]) {
-                scheduleSubscribersByLevel[subscriber.level].push(subscriber);
-            } else {
-                scheduleSubscribersByLevel[subscriber.level] = [subscriber];
-            }
-        }
-
+    if (schedulePromise) {
         return;
     }
 
-    if (scheduleQueue) {
-        scheduleQueue.add(subscribers);
-
-        return;
-    }
-
-    scheduleQueue = new Set([subscribers]);
     schedulePromise = Promise.resolve().then(() => {
-        clock++;
-        schedulePromise = null;
-        scheduleSubscribersByLevel = [];
-
-        for (const subscribers of scheduleQueue!) {
-            scheduleUpdates(subscribers);
+        if (!scheduleQueue) {
+            return;
         }
+
+        clock++;
+
+        for (let level = 1; level < scheduleQueue.length; level++) {
+            if (scheduleQueue[level]) {
+                for (let index = 0; index < scheduleQueue[level].length; index++) {
+                    if (scheduleQueue[level][index].clock !== clock) {
+                        scheduleQueue[level][index].clock = clock;
+                        scheduleQueue[level][index].callback();
+                    }
+                }
+            }
+        }
+
+        const subscribers = scheduleQueue[0];
 
         scheduleQueue = null;
+        schedulePromise = null;
 
-        for (let index = 1; index < scheduleSubscribersByLevel.length; index++) {
-            runSubscribers(scheduleSubscribersByLevel[index]);
+        if (subscribers) {
+            for (let index = 0; index < subscribers.length; index++) {
+                if (subscribers[index].clock !== clock) {
+                    subscribers[index].clock = clock;
+                    subscribers[index].callback();
+                }
+            }
         }
-
-        const subscribers = scheduleSubscribersByLevel[0];
-
-        scheduleSubscribersByLevel = null;
-        runSubscribers(subscribers);
     });
 };
 
 export const flush = async (): Promise<void> => {
-    if (schedulePromise) {
+    while (schedulePromise) {
         await schedulePromise;
     }
 };
@@ -97,13 +93,7 @@ const createSubscriber = (callback: () => void = () => {}, level: 0 | 1 = 0) => 
     level
 });
 
-const resetSubscriber = (subscriber: Subscriber) => {
-    subscriber.signals = new Set();
-    subscriber.clock = clock;
-    subscriber.level = subscriber.level && 1;
-};
-
-let subscriberToDelete: Subscriber | null = null;
+let runDeleteSubscriber: Subscriber | null = null;
 
 let unsubscribeQueue: Subscriber[] | null = null;
 
@@ -118,34 +108,38 @@ const unsubscribe = (subscriber: Subscriber) => {
 
     for (let index = 0; index < unsubscribeQueue.length; index++) {
         for (const signal of unsubscribeQueue[index].signals) {
-            subscriberToDelete = unsubscribeQueue[index];
+            runDeleteSubscriber = unsubscribeQueue[index];
             signal();
         }
 
-        resetSubscriber(unsubscribeQueue[index]);
+        unsubscribeQueue[index].signals = new Set();
+        unsubscribeQueue[index].clock = clock;
+        unsubscribeQueue[index].level = unsubscribeQueue[index].level && 1;
     }
 
     unsubscribeQueue = null;
 };
 
-let subscriberToAdd: Subscriber | null = null;
+let runAddSubscriber: Subscriber | null = null;
 
 const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
     const prevSignals = subscriber.signals;
 
-    resetSubscriber(subscriber);
+    subscriber.signals = new Set();
+    subscriber.clock = clock;
+    subscriber.level = subscriber.level && 1;
 
-    const prevSubscriber = subscriberToAdd;
+    const prevSubscriber = runAddSubscriber;
 
-    subscriberToAdd = subscriber;
+    runAddSubscriber = subscriber;
 
     const value = func();
 
-    subscriberToAdd = prevSubscriber;
+    runAddSubscriber = prevSubscriber;
 
     for (const signal of prevSignals) {
         if (!subscriber.signals.has(signal)) {
-            subscriberToDelete = subscriber;
+            runDeleteSubscriber = subscriber;
             signal();
         }
     }
@@ -154,13 +148,13 @@ const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
 };
 
 export const sample = <T>(func: () => T): T => {
-    const prevSubscriber = subscriberToAdd;
+    const prevSubscriber = runAddSubscriber;
 
-    subscriberToAdd = null;
+    runAddSubscriber = null;
 
     const value = func();
 
-    subscriberToAdd = prevSubscriber;
+    runAddSubscriber = prevSubscriber;
 
     return value;
 };
@@ -169,9 +163,9 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
     let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
     const subscribers = new Set<Subscriber>();
     const signal = (...args: [T | ((value: T) => T)] | []) => {
-        if (subscriberToDelete) {
-            subscribers.delete(subscriberToDelete);
-            subscriberToDelete = null;
+        if (runDeleteSubscriber) {
+            subscribers.delete(runDeleteSubscriber);
+            runDeleteSubscriber = null;
 
             return value;
         }
@@ -183,16 +177,16 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
                 value = nextValue;
 
                 if (subscribers.size) {
-                    scheduleUpdates(subscribers);
+                    schedule(subscribers);
                 }
             }
 
-            return nextValue;
+            return value;
         }
 
-        if (subscriberToAdd) {
-            subscribers.add(subscriberToAdd);
-            subscriberToAdd.signals.add(signal);
+        if (runAddSubscriber) {
+            subscribers.add(runAddSubscriber);
+            runAddSubscriber.signals.add(signal);
         }
 
         return value;
@@ -211,15 +205,15 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
 
 let computeQueue: Computed<any>[] | null = null;
 
-let recursionCount = 0;
+let computeRecursionCount = 0;
 
-let tryToCompute = false;
+let runCompute = false;
 
 const compute = <T>(computed: Computed<T>) => {
-    if (recursionCount++ < 1000) {
-        tryToCompute = true;
+    if (computeRecursionCount++ < 1000) {
+        runCompute = true;
         computed();
-        recursionCount = 0;
+        computeRecursionCount = 0;
 
         return;
     }
@@ -233,7 +227,7 @@ const compute = <T>(computed: Computed<T>) => {
     // eslint-disable-next-line no-constant-condition
     while (true) {
         computeQueue = [];
-        tryToCompute = true;
+        runCompute = true;
         computed();
 
         if (!computeQueue.length) {
@@ -243,12 +237,12 @@ const compute = <T>(computed: Computed<T>) => {
         }
 
         for (let index = 0; index < computeQueue.length; index++) {
-            tryToCompute = true;
+            runCompute = true;
             computeQueue[index]();
         }
 
         for (let index = computeQueue.length - 2; index > -1; index--) {
-            tryToCompute = true;
+            runCompute = true;
             computeQueue[index]();
         }
     }
@@ -264,7 +258,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
 
             if (nextValue !== value) {
                 value = nextValue;
-                scheduleUpdates(subscribers);
+                schedule(subscribers);
             }
 
             return;
@@ -275,8 +269,8 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
         unsubscribe(subscriber);
     }, 1);
     const computed = () => {
-        if (tryToCompute) {
-            tryToCompute = false;
+        if (runCompute) {
+            runCompute = false;
 
             if (hasValue) {
                 return value;
@@ -291,7 +285,7 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
                     hasValue = true;
                 }
 
-                return nextValue;
+                return value;
             }
 
             value = autoSubscribe(func, subscriber);
@@ -300,9 +294,9 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             return value;
         }
 
-        if (subscriberToDelete) {
-            subscribers.delete(subscriberToDelete);
-            subscriberToDelete = null;
+        if (runDeleteSubscriber) {
+            subscribers.delete(runDeleteSubscriber);
+            runDeleteSubscriber = null;
 
             if (subscribers.size) {
                 return value;
@@ -312,17 +306,17 @@ export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
             hasValue = false;
             unsubscribe(subscriber);
 
-            return fallback;
+            return value;
         }
 
         if (!hasValue) {
             compute(computed);
         }
 
-        if (subscriberToAdd) {
-            subscribers.add(subscriberToAdd);
-            subscriberToAdd.signals.add(computed);
-            subscriberToAdd.level = subscriberToAdd.level && Math.max(subscriberToAdd.level, subscriber.level + 1);
+        if (runAddSubscriber) {
+            subscribers.add(runAddSubscriber);
+            runAddSubscriber.signals.add(computed);
+            runAddSubscriber.level = runAddSubscriber.level && Math.max(runAddSubscriber.level, subscriber.level + 1);
         }
 
         return value;
@@ -360,7 +354,7 @@ export const createEvent = <T = void>(): Event<T> => {
     return event;
 };
 
-export const effect = (func: () => void | (() => void)): (() => void) => {
+export const createEffect = (func: () => void | (() => void)): (() => void) => {
     let value: void | (() => void);
     const subscriber = createSubscriber(() => {
         if (typeof value === 'function') {
