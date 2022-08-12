@@ -224,28 +224,21 @@ const compute = <T>(computed: Computed<T>) => {
         return;
     }
 
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-        computeQueue = [];
-        runCompute = true;
-        computed();
-
-        if (!computeQueue.length) {
-            computeQueue = null;
-
-            return;
-        }
+    do {
+        computeQueue = [computed];
 
         for (let index = 0; index < computeQueue.length; index++) {
             runCompute = true;
             computeQueue[index]();
         }
 
-        for (let index = computeQueue.length - 2; index > -1; index--) {
+        for (let index = computeQueue.length - 2; index > 0; index--) {
             runCompute = true;
             computeQueue[index]();
         }
-    }
+    } while (computeQueue.length !== 1);
+
+    computeQueue = null;
 };
 
 export const createComputed = <T>(func: () => T, fallback: T): Computed<T> => {
