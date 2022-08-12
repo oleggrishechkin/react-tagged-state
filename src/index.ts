@@ -424,9 +424,9 @@ export const useSelector = <T>(func: () => T): T => {
             let value: T;
 
             return () => {
-                if (clock !== currentClock) {
-                    currentClock = clock;
+                if (subscriber.clock !== currentClock) {
                     value = autoSubscribe(func, subscriber);
+                    currentClock = subscriber.clock;
                 }
 
                 return value;
