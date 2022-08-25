@@ -42,25 +42,9 @@ const Counter = () => {
 
 ## Quick Guide
 
-### Basics
-
-When you read a signal value into some effect it will be added to this effect deps.<br>
-Automatically.
-
-When you write signal value all dependent effects wil be re-run.<br>
-Automatically.
-
-```typescript jsx
-effect(function logSignal() {
-  // "signal" will be added to the effect deps when we read "signal" value
-  // "logSignal" will be re-run when we write "signal" value
-  console.log(signal());
-});
-```
-
 ### Signals
 
-Create a signal by calling `createSignal` with initial value.
+Create a signal by calling `createSignal` with initial value:
 
 ```typescript jsx
 import { createSignal } from 'react-tagged-state';
@@ -68,8 +52,7 @@ import { createSignal } from 'react-tagged-state';
 const counter = createSignal(0);
 ```
 
-Read value by calling a signal without arguments.<br>
-Write value by calling a signal with next value.
+Read value by calling a signal without arguments, write value by calling a signal with next value:
 
 ```typescript jsx
 import { createSignal } from 'react-tagged-state';
@@ -85,7 +68,7 @@ counter(10);
 
 ### React & Hooks
 
-Subscribe component to a signal by calling `useSignal`.
+Subscribe component to a signal by calling `useSignal`:
 
 ```typescript jsx
 import {
@@ -110,7 +93,7 @@ const Counter = () => {
 };
 ```
 
-Also, you can use selectors by calling `useSelector`.
+Use selectors by calling `useSelector`:
 
 ```typescript jsx
 import {
@@ -146,7 +129,7 @@ const doubledCounter = createComputed(
 );
 ```
 
-Computed is a read-only signal.
+Read value by calling a computed without arguments:
 
 ```typescript jsx
 import {
@@ -166,7 +149,7 @@ const value = doubledCounter();
 
 ### Effects
 
-Create an effect by calling `createEffect` with callback.
+Create an effect by calling `createEffect` with callback:
 
 ```typescript jsx
 import {
@@ -183,29 +166,27 @@ const unsubscribe = createEffect(() => {
 
 ### Subscriptions
 
-Subscribe to a signal by calling `signal.on` method with callback.
+Create a subscription by calling `createSubscription` with signal (or computed) and callback.
 
 ```typescript jsx
-import { createSignal } from 'react-tagged-state';
+import {
+  createSignal,
+  createSubscription
+} from 'react-tagged-state';
 
 const counter = createSignal(0);
 
-const unsubscribe = counter.on((value) => {
-  console.log(value);
-});
+const unsubscribe = createSubscription(
+  counter,
+  (value) => {
+    console.log(value);
+  }
+);
 ```
-
-## SSR
-
-In Server-Side Rendering all subscriptions not work excepts `signal.on` and `event.on` methods with `{ ssr: true }` option.
 
 ## Concurrent Mode
 
 Partial concurrent mode support via `useSyncExternalStore`.
-
-## Documentation
-
-Visit [the documentation site](https://oleggrishechkin.github.io/react-tagged-state/).
 
 ## Example
 
