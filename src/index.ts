@@ -246,10 +246,11 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
 
     return (...args: [T | ((value: T) => T)] | []) => {
         if (args.length) {
-            const nextValue = runIfFunction(args[0], value);
+            const prevValue = value;
 
-            if (nextValue !== value) {
-                value = nextValue;
+            value = runIfFunction(args[0], prevValue);
+
+            if (prevValue !== value) {
                 schedule(signalNode);
             }
         } else {
@@ -274,12 +275,12 @@ export const createComputed = <T>(
                 unsubscribe(computedNode);
             } else {
                 const level = computedNode.level;
-                const nextValue = autoSubscribe(selector, computedNode);
+                const prevValue = value;
 
+                value = autoSubscribe(selector, computedNode);
                 computedNode.level = Math.max(level, computedNode.level);
 
-                if (nextValue !== value) {
-                    value = nextValue;
+                if (prevValue !== value) {
                     schedule(computedNode);
                 }
             }
