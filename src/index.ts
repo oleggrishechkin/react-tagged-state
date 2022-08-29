@@ -11,7 +11,6 @@ export interface Computed<T> {
 
 interface SignalNode {
     subscribers: Set<SubscriberNode | ComputedNode>;
-    level: number;
 }
 
 interface ComputedNode extends SignalNode, SubscriberNode {
@@ -34,19 +33,6 @@ let scheduleQueue: SubscriberNode[][] | null = null;
 
 let clock = {};
 
-const runSubscriberNodes = (subscriberNodes: SubscriberNode[]) => {
-    if (subscriberNodes) {
-        for (let index = 0; index < subscriberNodes.length; index++) {
-            const subscriberNode = subscriberNodes[index];
-
-            if (subscriberNode.clock !== clock) {
-                subscriberNode.clock = clock;
-                subscriberNode.callback();
-            }
-        }
-    }
-};
-
 let schedulePromise: Promise<void> | null = null;
 
 export const sync = (): void => {
@@ -57,7 +43,18 @@ export const sync = (): void => {
                 canSync = false;
 
                 for (let level = 1; level < scheduleQueue.length; level++) {
-                    runSubscriberNodes(scheduleQueue[level]);
+                    const subscriberNodes = scheduleQueue[level];
+
+                    if (subscriberNodes) {
+                        for (let index = 0; index < subscriberNodes.length; index++) {
+                            const subscriberNode = subscriberNodes[index];
+
+                            if (subscriberNode.clock !== clock) {
+                                subscriberNode.clock = clock;
+                                subscriberNode.callback();
+                            }
+                        }
+                    }
                 }
 
                 canSync = true;
@@ -65,7 +62,17 @@ export const sync = (): void => {
                 const subscriberNodes = scheduleQueue[0];
 
                 scheduleQueue = null;
-                runSubscriberNodes(subscriberNodes);
+
+                if (subscriberNodes) {
+                    for (let index = 0; index < subscriberNodes.length; index++) {
+                        const subscriberNode = subscriberNodes[index];
+
+                        if (subscriberNode.clock !== clock) {
+                            subscriberNode.clock = clock;
+                            subscriberNode.callback();
+                        }
+                    }
+                }
             }
         }
 
@@ -99,15 +106,15 @@ const schedule = (signalNode: SignalNode) => {
     }
 };
 
-const dispose = (subscriberNode: SubscriberNode) => {
+const unsubscribe = (subscriberNode: SubscriberNode) => {
     subscriberNode.cleanup();
+    subscriberNode.clock = clock;
 
     if (subscriberNode.children) {
         for (let index = 0; index < subscriberNode.children.length; index++) {
             const child = subscriberNode.children[index];
 
             if ('signals' in child) {
-                // eslint-disable-next-line @typescript-eslint/no-use-before-define
                 unsubscribe(child);
             }
 
@@ -122,12 +129,6 @@ const dispose = (subscriberNode: SubscriberNode) => {
 
         subscriberNode.children = null;
     }
-};
-
-const unsubscribe = (subscriberNode: SubscriberNode) => {
-    dispose(subscriberNode);
-
-    subscriberNode.clock = clock;
 
     if (subscriberNode.signals.size) {
         for (const signalNode of subscriberNode.signals) {
@@ -151,9 +152,28 @@ let currentParentNode: SubscriberNode | null = null;
 let currentSubscriberNode: SubscriberNode | null = null;
 
 const autoSubscribe = <T>(func: () => T, subscriberNode: SubscriberNode): T => {
-    dispose(subscriberNode);
-
+    subscriberNode.cleanup();
     subscriberNode.clock = clock;
+
+    if (subscriberNode.children) {
+        for (let index = 0; index < subscriberNode.children.length; index++) {
+            const child = subscriberNode.children[index];
+
+            if ('signals' in child) {
+                unsubscribe(child);
+            }
+
+            if ('subscribers' in child && child.subscribers.size) {
+                for (const subscriberNode of child.subscribers) {
+                    subscriberNode.signals.delete(child);
+                }
+
+                child.subscribers.clear();
+            }
+        }
+
+        subscriberNode.children = null;
+    }
 
     let signalNodes;
 
@@ -209,52 +229,32 @@ export const sample = <T>(func: () => T): T => {
     return value;
 };
 
-const addToParentNode = (anyNode: SignalNode | ComputedNode | SubscriberNode) => {
+export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
+    let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
+    const signalNode: SignalNode = { subscribers: new Set() };
+
     if (currentParentNode) {
         if (currentParentNode.children) {
-            currentParentNode.children.push(anyNode);
+            currentParentNode.children.push(signalNode);
         } else {
-            currentParentNode.children = [anyNode];
+            currentParentNode.children = [signalNode];
         }
     }
-};
-
-const bindWithSubscriberNode = (signalNode: SignalNode) => {
-    if (currentSubscriberNode) {
-        signalNode.subscribers.add(currentSubscriberNode);
-        currentSubscriberNode.signals.add(signalNode);
-
-        if (currentSubscriberNode.level && signalNode.level) {
-            currentSubscriberNode.level = Math.max(currentSubscriberNode.level, signalNode.level + 1);
-        }
-    }
-};
-
-const runIfFunction = <T, K extends any[]>(value: T | ((...args: K) => T), ...args: K) => {
-    if (typeof value === 'function') {
-        return (value as (...args: K) => T)(...args);
-    }
-
-    return value;
-};
-
-export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
-    let value = runIfFunction(initialValue);
-    const signalNode: SignalNode = { subscribers: new Set(), level: 0 };
-
-    addToParentNode(signalNode);
 
     return (...args: [T | ((value: T) => T)] | []) => {
         if (args.length) {
             const prevValue = value;
 
-            value = runIfFunction(args[0], prevValue);
+            value = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(prevValue) : args[0];
 
             if (prevValue !== value) {
                 schedule(signalNode);
             }
         } else {
-            bindWithSubscriberNode(signalNode);
+            if (currentSubscriberNode) {
+                signalNode.subscribers.add(currentSubscriberNode);
+                currentSubscriberNode.signals.add(signalNode);
+            }
         }
 
         return value;
@@ -296,7 +296,13 @@ export const createComputed = <T>(
         lazy
     };
 
-    addToParentNode(computedNode);
+    if (currentParentNode) {
+        if (currentParentNode.children) {
+            currentParentNode.children.push(computedNode);
+        } else {
+            currentParentNode.children = [computedNode];
+        }
+    }
 
     if (!computedNode.lazy) {
         value = autoSubscribe(selector, computedNode);
@@ -311,15 +317,25 @@ export const createComputed = <T>(
             value = autoSubscribe(selector, computedNode);
         }
 
-        bindWithSubscriberNode(computedNode);
+        if (currentSubscriberNode) {
+            computedNode.subscribers.add(currentSubscriberNode);
+            currentSubscriberNode.signals.add(computedNode);
+
+            if (currentSubscriberNode.level) {
+                currentSubscriberNode.level = Math.max(currentSubscriberNode.level, computedNode.level + 1);
+            }
+        }
 
         return value as T;
     };
 };
 
-const NOOP = () => {};
-
-const createSubscriberNode = ({ callback = NOOP, level = 0, pure = false, cleanup = NOOP } = {}): SubscriberNode => ({
+const createSubscriberNode = ({
+    callback = () => {},
+    level = 0,
+    pure = false,
+    cleanup = () => {}
+} = {}): SubscriberNode => ({
     callback,
     signals: new Set(),
     level,
@@ -339,10 +355,21 @@ export const createEffect = (
             value = autoSubscribe(callback, subscriberNode);
         },
         pure,
-        cleanup: () => runIfFunction(value)
+        cleanup: () => {
+            if (typeof value === 'function') {
+                value();
+            }
+        }
     });
 
-    addToParentNode(subscriberNode);
+    if (currentParentNode) {
+        if (currentParentNode.children) {
+            currentParentNode.children.push(subscriberNode);
+        } else {
+            currentParentNode.children = [subscriberNode];
+        }
+    }
+
     value = autoSubscribe(callback, subscriberNode);
 
     return () => unsubscribe(subscriberNode);
@@ -358,18 +385,27 @@ export const createSubscription = <T>(
             value = callback(autoSubscribe(signal, subscriberNode));
         },
         pure: true,
-        cleanup: () => runIfFunction(value)
+        cleanup: () => {
+            if (typeof value === 'function') {
+                value();
+            }
+        }
     });
 
-    addToParentNode(subscriberNode);
+    if (currentParentNode) {
+        if (currentParentNode.children) {
+            currentParentNode.children.push(subscriberNode);
+        } else {
+            currentParentNode.children = [subscriberNode];
+        }
+    }
+
     autoSubscribe(signal, subscriberNode);
 
     return () => unsubscribe(subscriberNode);
 };
 
-const IS_SSR = typeof window === 'undefined';
-
-const useIsomorphicLayoutEffect = IS_SSR ? useEffect : useLayoutEffect;
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
 
 const useSyncExternalStoreShim =
     typeof useSyncExternalStore === 'undefined'
