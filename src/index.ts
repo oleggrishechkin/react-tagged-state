@@ -241,13 +241,19 @@ const createNode = <T extends SignalNode | ComputedNode | SubscriberNode>(anyNod
     return anyNode;
 };
 
+const EMPTY_VALUE = {};
+
 export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
-    let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
+    let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
     const signalNode = createNode({ subscribers: new Set() });
 
     return (...args: [T | ((value: T) => T)] | []) => {
+        if (value === EMPTY_VALUE) {
+            value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
+        }
+
         if (args.length) {
-            const prevValue = value;
+            const prevValue = value as T;
 
             value = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(prevValue) : args[0];
 
@@ -261,11 +267,9 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
             }
         }
 
-        return value;
+        return value as T;
     };
 };
-
-const EMPTY_VALUE = {};
 
 export const createComputed = <T>(
     selector: () => T,

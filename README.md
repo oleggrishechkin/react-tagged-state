@@ -40,7 +40,34 @@ const Counter = () => {
 };
 ```
 
-## Quick Guide
+## Introduction
+
+Base part of React Tagged State is a signals and effects.<br>
+Signal is a value container. It can read and write value.<br>
+Effect is an observer. It automatically tracks what signals was read inside it and call self anytime when any of these signals changed.
+
+```typescript jsx
+import {
+  createSignal,
+  createEffect
+} from 'react-tagged-state';
+
+const initialValue = 0;
+
+const counter = createSignal(initialValue);
+
+createEffect(() => {
+  console.log('counter changed: ', counter());
+});
+
+counter(10); // counter changed: 10
+
+counter((count) => count + 1); // counter changed: 11
+
+counter(initialValue); // counter changed: 0
+```
+
+## API Overview
 
 ### Signals
 
@@ -54,8 +81,9 @@ const counter = createSignal(0);
 
 //with function
 const anotherCounter = createSignal(() => 0);
-
 ```
+
+> 💡 Signal initialize value when you read or write it first time.<br>
 
 Read value by calling a signal without arguments, write value by calling a signal with next value:
 
@@ -137,6 +165,8 @@ const doubledCounter = createComputed(
 );
 ```
 
+> 💡 Computed select value when you read it first time or when its dependencies changed. Computed unsubscribed automatically when nothing depends on it.
+
 Read value by calling a computed without arguments:
 
 ```typescript jsx
@@ -154,9 +184,6 @@ const doubledCounter = createComputed(
 // read
 const value = doubledCounter();
 ```
-
-Computed select value when you read it first time or when its dependencies changed.<br>
-Computed unsubscribed automatically when nothing depends on it.
 
 ### Effects
 
@@ -197,8 +224,7 @@ const unsubscribe = createSubscription(
 
 ### Batching
 
-Updates batched automatically via microtask.<br>
-Run batched updates immediately by calling `sync`:
+Updates batched automatically via microtask. Run batched updates immediately by calling `sync`:
 
 ```typescript jsx
 import {
@@ -213,7 +239,7 @@ counter(10);
 sync();
 ```
 
-It called automatically when you read any computed, but sometimes you need to call `sync` manually.
+> 💡 `sync` called automatically when you read any computed.
 
 ## Concurrent Mode
 
