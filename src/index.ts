@@ -229,17 +229,21 @@ export const sample = <T>(func: () => T): T => {
     return value;
 };
 
-export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
-    let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
-    const signalNode: SignalNode = { subscribers: new Set() };
-
+const createNode = <T extends SignalNode | ComputedNode | SubscriberNode>(anyNode: T): T => {
     if (currentParentNode) {
         if (currentParentNode.children) {
-            currentParentNode.children.push(signalNode);
+            currentParentNode.children.push(anyNode);
         } else {
-            currentParentNode.children = [signalNode];
+            currentParentNode.children = [anyNode];
         }
     }
+
+    return anyNode;
+};
+
+export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
+    let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
+    const signalNode = createNode({ subscribers: new Set() });
 
     return (...args: [T | ((value: T) => T)] | []) => {
         if (args.length) {
@@ -268,17 +272,17 @@ export const createComputed = <T>(
     { lazy = true, pure = false }: { lazy?: boolean; pure?: boolean } = {}
 ): Computed<T> => {
     let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
-    const computedNode: ComputedNode = {
+    const computedNode = createNode({
         subscribers: new Set(),
         callback: () => {
             if (!computedNode.subscribers.size && computedNode.lazy) {
                 unsubscribe(computedNode);
             } else {
-                const level = computedNode.level;
                 const prevValue = value;
+                const prevLevel = computedNode.level;
 
                 value = autoSubscribe(selector, computedNode);
-                computedNode.level = Math.max(level, computedNode.level);
+                computedNode.level = Math.max(prevLevel, computedNode.level);
 
                 if (prevValue !== value) {
                     schedule(computedNode);
@@ -294,15 +298,7 @@ export const createComputed = <T>(
             value = EMPTY_VALUE;
         },
         lazy
-    };
-
-    if (currentParentNode) {
-        if (currentParentNode.children) {
-            currentParentNode.children.push(computedNode);
-        } else {
-            currentParentNode.children = [computedNode];
-        }
-    }
+    });
 
     if (!computedNode.lazy) {
         value = autoSubscribe(selector, computedNode);
@@ -330,45 +326,26 @@ export const createComputed = <T>(
     };
 };
 
-const createSubscriberNode = ({
-    callback = () => {},
-    level = 0,
-    pure = false,
-    cleanup = () => {}
-} = {}): SubscriberNode => ({
-    callback,
-    signals: new Set(),
-    level,
-    children: null,
-    pure,
-    clock,
-    cleanup
-});
-
 export const createEffect = (
     callback: () => void | (() => void),
     { pure = false }: { pure?: boolean } = {}
 ): (() => void) => {
     let value: void | (() => void);
-    const subscriberNode = createSubscriberNode({
+    const subscriberNode = createNode({
         callback: () => {
             value = autoSubscribe(callback, subscriberNode);
         },
+        signals: new Set(),
+        level: 0,
+        children: null,
         pure,
+        clock,
         cleanup: () => {
             if (typeof value === 'function') {
                 value();
             }
         }
     });
-
-    if (currentParentNode) {
-        if (currentParentNode.children) {
-            currentParentNode.children.push(subscriberNode);
-        } else {
-            currentParentNode.children = [subscriberNode];
-        }
-    }
 
     value = autoSubscribe(callback, subscriberNode);
 
@@ -376,15 +353,27 @@ export const createEffect = (
 };
 
 export const createSubscription = <T>(
-    signal: Signal<T> | Computed<T>,
-    callback: (value: T) => void | (() => void)
+    selector: () => T,
+    callback: (value: T) => void | (() => void),
+    { pure = false }: { pure?: boolean } = {}
 ): (() => void) => {
+    let selection: T;
     let value: void | (() => void);
-    const subscriberNode = createSubscriberNode({
+    const subscriberNode = createNode({
         callback: () => {
-            value = callback(autoSubscribe(signal, subscriberNode));
+            const prevSelection = selection;
+
+            selection = autoSubscribe(selector, subscriberNode);
+
+            if (prevSelection !== selection) {
+                value = callback(selection);
+            }
         },
-        pure: true,
+        signals: new Set(),
+        level: 0,
+        children: null,
+        pure,
+        clock,
         cleanup: () => {
             if (typeof value === 'function') {
                 value();
@@ -392,15 +381,7 @@ export const createSubscription = <T>(
         }
     });
 
-    if (currentParentNode) {
-        if (currentParentNode.children) {
-            currentParentNode.children.push(subscriberNode);
-        } else {
-            currentParentNode.children = [subscriberNode];
-        }
-    }
-
-    autoSubscribe(signal, subscriberNode);
+    selection = autoSubscribe(selector, subscriberNode);
 
     return () => unsubscribe(subscriberNode);
 };
@@ -438,14 +419,20 @@ const useSyncExternalStoreShim =
           }
         : useSyncExternalStore;
 
-export const useSignal = <T>(signal: Signal<T> | Computed<T>): T =>
-    useSyncExternalStoreShim(
-        useCallback((handleChange) => createSubscription(signal, handleChange), [signal]),
-        signal
-    );
-
 export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const subscriberNode = useMemo(() => createSubscriberNode({ pure }), [pure]);
+    const subscriberNode = useMemo(
+        () =>
+            createNode({
+                callback: () => {},
+                signals: new Set(),
+                level: 0,
+                children: null,
+                pure,
+                clock,
+                cleanup: () => {}
+            }),
+        [pure]
+    );
 
     return useSyncExternalStoreShim(
         useCallback(
@@ -458,15 +445,15 @@ export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boo
         ),
         useMemo(() => {
             let currentClock: typeof clock;
-            let value: T;
+            let selection: T;
 
             return () => {
                 if (subscriberNode.clock !== currentClock) {
-                    value = autoSubscribe(selector, subscriberNode);
+                    selection = autoSubscribe(selector, subscriberNode);
                     currentClock = subscriberNode.clock;
                 }
 
-                return value;
+                return selection;
             };
         }, [selector, subscriberNode])
     );

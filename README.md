@@ -11,22 +11,22 @@
 
 **React Tagged State** uses the same reactivity pattern as [SolidJS](https://www.solidjs.com/) and [S.js](https://github.com/adamhaile/S) but optimized for usage with React.
 
-- Batch all updates automatically
-- Run exactly affected subscribers only once per batch
-- Lazy computed
+- Updates batched automatically.
+- Affected subscribers called only once per batch.
+- Lazy computed.
 
 ## Basic Usage
 
 ```typescript jsx
 import {
   createSignal,
-  useSignal
+  useSelector
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
-  const count = useSignal(counter);
+  const count = useSelector(counter);
 
   return (
     <button
@@ -49,7 +49,12 @@ Create a signal by calling `createSignal` with initial value:
 ```typescript jsx
 import { createSignal } from 'react-tagged-state';
 
+// with value
 const counter = createSignal(0);
+
+//with function
+const anotherCounter = createSignal(() => 0);
+
 ```
 
 Read value by calling a signal without arguments, write value by calling a signal with next value:
@@ -62,24 +67,27 @@ const counter = createSignal(0);
 // read
 const value = counter();
 
-// write
+// write with value
 counter(10);
+
+// write with function
+counter((count) => count + 1);
 ```
 
 ### React & Hooks
 
-Subscribe component to a signal by calling `useSignal`:
+Subscribe component to a signal, computed or selector by calling `useSelector`:
 
 ```typescript jsx
 import {
   createSignal,
-  useSignal
+  useSelector
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const Counter = () => {
-  const count = useSignal(counter);
+  const count = useSelector(counter);
 
   return (
     <button
@@ -93,7 +101,7 @@ const Counter = () => {
 };
 ```
 
-Use selectors by calling `useSelector`:
+Use props inside `useSelector`:
 
 ```typescript jsx
 import {
@@ -114,7 +122,7 @@ const Item = ({ itemId }: { itemId: number }) => {
 
 ### Computed
 
-Create a computed by calling `createComputed` with selector.
+Create a computed by calling `createComputed` with selector:
 
 ```typescript jsx
 import {
@@ -147,6 +155,9 @@ const doubledCounter = createComputed(
 const value = doubledCounter();
 ```
 
+Computed select value when you read it first time or when its dependencies changed.<br>
+Computed unsubscribed automatically when nothing depends on it.
+
 ### Effects
 
 Create an effect by calling `createEffect` with callback:
@@ -166,7 +177,7 @@ const unsubscribe = createEffect(() => {
 
 ### Subscriptions
 
-Create a subscription by calling `createSubscription` with signal (or computed) and callback.
+Create a subscription by calling `createSubscription` with signal, computed or selector and callback:
 
 ```typescript jsx
 import {
@@ -183,6 +194,26 @@ const unsubscribe = createSubscription(
   }
 );
 ```
+
+### Batching
+
+Updates batched automatically via microtask.<br>
+Run batched updates immediately by calling `sync`:
+
+```typescript jsx
+import {
+  createSignal,
+  sync
+} from 'react-tagged-state';
+
+const counter = createSignal(0);
+
+counter(10);
+
+sync();
+```
+
+It called automatically when you read any computed, but sometimes you need to call `sync` manually.
 
 ## Concurrent Mode
 
