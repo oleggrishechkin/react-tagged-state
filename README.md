@@ -20,7 +20,7 @@
 ```typescript jsx
 import {
   createSignal,
-  useSelector
+  useSelector,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
@@ -49,7 +49,7 @@ Effect is an observer. It automatically tracks what signals was read inside it a
 ```typescript jsx
 import {
   createSignal,
-  createEffect
+  createEffect,
 } from 'react-tagged-state';
 
 const initialValue = 0;
@@ -109,7 +109,7 @@ Subscribe component to a signal, computed or selector by calling `useSelector`:
 ```typescript jsx
 import {
   createSignal,
-  useSelector
+  useSelector,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
@@ -134,7 +134,7 @@ Use props inside `useSelector`:
 ```typescript jsx
 import {
   createSignal,
-  useSelector
+  useSelector,
 } from 'react-tagged-state';
 
 const items = createSignal<
@@ -155,13 +155,13 @@ Create a computed by calling `createComputed` with selector:
 ```typescript jsx
 import {
   createSignal,
-  createComputed
+  createComputed,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const doubledCounter = createComputed(
-  () => counter() * 2
+  () => counter() * 2,
 );
 ```
 
@@ -172,13 +172,13 @@ Read value by calling a computed without arguments:
 ```typescript jsx
 import {
   createSignal,
-  createComputed
+  createComputed,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
 const doubledCounter = createComputed(
-  () => counter() * 2
+  () => counter() * 2,
 );
 
 // read
@@ -192,7 +192,7 @@ Create an effect by calling `createEffect` with callback:
 ```typescript jsx
 import {
   createSignal,
-  createEffect
+  createEffect,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
@@ -209,7 +209,7 @@ Create a subscription by calling `createSubscription` with signal, computed or s
 ```typescript jsx
 import {
   createSignal,
-  createSubscription
+  createSubscription,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
@@ -218,7 +218,7 @@ const unsubscribe = createSubscription(
   counter,
   (value) => {
     console.log(value);
-  }
+  },
 );
 ```
 
@@ -229,7 +229,7 @@ Updates batched automatically via microtask. Run batched updates immediately by 
 ```typescript jsx
 import {
   createSignal,
-  sync
+  sync,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);

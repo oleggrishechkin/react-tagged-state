@@ -229,12 +229,12 @@ const createSubscriber = ({ callback = () => {}, level = 0, pure = false }): Sub
     callback,
     clock,
     level,
-    pure
+    pure,
 });
 
 export const createComputed = <T>(
     selector: () => T,
-    { lazy = true, pure = false }: { lazy?: boolean; pure?: boolean } = {}
+    { lazy = true, pure = false }: { lazy?: boolean; pure?: boolean } = {},
 ): Computed<T> => {
     let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
     const subscribers = new Set<Subscriber>();
@@ -256,7 +256,7 @@ export const createComputed = <T>(
             }
         },
         level: 1,
-        pure
+        pure,
     });
     const cleanup = (subscriberNode: Subscriber) => {
         subscribers.delete(subscriberNode);
@@ -316,7 +316,7 @@ const runCleanup = (cleanup: void | (() => void)) => {
 
 export const createEffect = (
     callback: () => void | (() => void),
-    { pure = false }: { pure?: boolean } = {}
+    { pure = false }: { pure?: boolean } = {},
 ): (() => void) => {
     let cleanup: void | (() => void);
     const subscriber = createSubscriber({
@@ -324,7 +324,7 @@ export const createEffect = (
             runCleanup(cleanup);
             cleanup = autoSubscribe(callback, subscriber);
         },
-        pure
+        pure,
     });
     const dispose = () => {
         runCleanup(cleanup);
@@ -341,7 +341,7 @@ export const createEffect = (
 export const createSubscription = <T>(
     selector: () => T,
     callback: (value: T) => void | (() => void),
-    { pure = false }: { pure?: boolean } = {}
+    { pure = false }: { pure?: boolean } = {},
 ): (() => void) => {
     let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
     let cleanup: void | (() => void);
@@ -355,7 +355,7 @@ export const createSubscription = <T>(
                 cleanup = callback(value);
             }
         },
-        pure
+        pure,
     });
     const dispose = () => {
         value = EMPTY_VALUE;
@@ -423,7 +423,7 @@ export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boo
 
                 return () => unsubscribe(subscriber);
             },
-            [subscriber]
+            [subscriber],
         ),
         useMemo(() => {
             let currentClock: typeof clock;
@@ -437,6 +437,6 @@ export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boo
 
                 return value;
             };
-        }, [selector, subscriber])
+        }, [selector, subscriber]),
     );
 };
