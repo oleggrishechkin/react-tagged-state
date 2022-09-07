@@ -414,7 +414,10 @@ const useSyncExternalStoreShim =
         : useSyncExternalStore;
 
 export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const subscriber = useMemo(() => createSubscriber({ pure }), [pure]);
+    const subscriber: Subscriber = useMemo(
+        () => createSubscriber({ callback: () => unsubscribe(subscriber), pure }),
+        [pure],
+    );
 
     return useSyncExternalStoreShim(
         useCallback(
@@ -430,7 +433,7 @@ export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boo
             let value: T;
 
             return () => {
-                if (subscriber.clock !== currentClock) {
+                if (subscriber.clock !== currentClock || !subscriber.cleanups.size) {
                     value = autoSubscribe(selector, subscriber);
                     currentClock = subscriber.clock;
                 }
