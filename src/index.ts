@@ -1,4 +1,4 @@
-import { useEffect, useDebugValue, useRef, useReducer } from 'react';
+import { useEffect, useDebugValue, useReducer } from 'react';
 
 export interface Signal<T> {
     (): T;
@@ -364,71 +364,84 @@ export const createSubscription = <T>(
     return dispose;
 };
 
-const reducer = () => ({});
+interface State<T> {
+    inst: {
+        subscriber: Subscriber;
+        value: T | typeof EMPTY_VALUE;
+        clock: typeof clock;
+        selector: () => T;
+    };
+}
 
-const initialValue = {};
+const initialize = <T>(selector: () => T): State<T> => {
+    const subscriber = createSubscriber({
+        callback: () => {
+            // eslint-disable-next-line @typescript-eslint/no-use-before-define
+            inst.value = EMPTY_VALUE;
+            unsubscribe(subscriber);
+        },
+    });
+
+    const inst = {
+        subscriber: subscriber,
+        value: autoSubscribe(selector, subscriber) as T | typeof EMPTY_VALUE,
+        clock: subscriber.clock,
+        selector,
+    };
+
+    return { inst };
+};
+
+const reducer = <T>({ inst }: State<T>): State<T> => ({ inst });
 
 export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const [, forceUpdate] = useReducer(reducer, initialValue);
-    const subscriberRef = useRef<Subscriber>();
-    const valueRef = useRef<T | typeof EMPTY_VALUE>(EMPTY_VALUE);
-    const clockRef = useRef<typeof clock>();
-    const selectorRef = useRef(selector);
+    const [{ inst }, forceUpdate] = useReducer<({ inst }: State<T>) => State<T>, () => T>(
+        reducer,
+        selector,
+        initialize,
+    );
 
-    if (!subscriberRef.current) {
-        const subscriber = createSubscriber({
-            callback: () => {
-                valueRef.current = EMPTY_VALUE;
-                unsubscribe(subscriber);
-            },
-            pure,
-        });
-
-        subscriberRef.current = subscriber;
-    }
-
-    const subscriber = subscriberRef.current;
-
-    subscriber.pure = pure;
+    inst.subscriber.pure = pure;
 
     useEffect(() => {
-        if (valueRef.current === EMPTY_VALUE || clockRef.current !== subscriber.clock) {
-            const nextValue = autoSubscribe(selectorRef.current, subscriber);
+        if (inst.value === EMPTY_VALUE || inst.clock !== inst.subscriber.clock) {
+            const nextValue = autoSubscribe(inst.selector, inst.subscriber);
 
-            clockRef.current = subscriber.clock;
+            inst.clock = inst.subscriber.clock;
 
-            if (nextValue !== valueRef.current) {
-                valueRef.current = nextValue;
+            if (nextValue !== inst.value) {
+                inst.value = nextValue;
                 forceUpdate();
             }
         }
 
-        subscriber.callback = () => {
-            if (clockRef.current !== subscriber.clock) {
-                const nextValue = autoSubscribe(selectorRef.current, subscriber);
+        inst.subscriber.callback = () => {
+            if (inst.clock !== inst.subscriber.clock) {
+                const nextValue = autoSubscribe(inst.selector, inst.subscriber);
 
-                clockRef.current = subscriber.clock;
+                inst.clock = inst.subscriber.clock;
 
-                if (nextValue !== valueRef.current) {
-                    valueRef.current = nextValue;
+                if (nextValue !== inst.value) {
+                    inst.value = nextValue;
                     forceUpdate();
                 }
             }
         };
 
         return () => {
-            valueRef.current = EMPTY_VALUE;
-            unsubscribe(subscriber);
+            inst.value = EMPTY_VALUE;
+            unsubscribe(inst.subscriber);
         };
-    }, [subscriber]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
 
-    if (valueRef.current === EMPTY_VALUE || selectorRef.current !== selector) {
-        valueRef.current = autoSubscribe(selector, subscriber);
-        clockRef.current = subscriber.clock;
-        selectorRef.current = selector;
+    if (inst.value === EMPTY_VALUE || inst.selector !== selector) {
+        inst.value = autoSubscribe(selector, inst.subscriber);
+        inst.clock = inst.subscriber.clock;
+        inst.selector = selector;
     }
 
-    useDebugValue(valueRef.current);
+    useDebugValue(inst.value);
 
-    return valueRef.current as T;
+    return inst.value as T;
 };
