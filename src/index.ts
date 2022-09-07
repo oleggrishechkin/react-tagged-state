@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, useSyncExternalStore, useDebugValue } from 'react';
+import { useEffect, useDebugValue, useRef, useReducer } from 'react';
 
 export interface Signal<T> {
     (): T;
@@ -170,8 +170,6 @@ export const sample = <T>(func: () => T): T => {
     return value;
 };
 
-const EMPTY_VALUE = {};
-
 const onDispose = (dispose: () => void) => {
     if (currentParent) {
         if (currentParent.disposes) {
@@ -182,13 +180,11 @@ const onDispose = (dispose: () => void) => {
     }
 };
 
-export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
-    let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
+export const createSignal = <T>(initialValue: T): Signal<T> => {
+    let value = initialValue;
     const subscribers = new Set<Subscriber>();
     const cleanup = (subscriberNode: Subscriber) => subscribers.delete(subscriberNode);
     const dispose = () => {
-        value = EMPTY_VALUE;
-
         if (subscribers.size) {
             for (const subscriberNode of subscribers) {
                 subscriberNode.cleanups.delete(cleanup);
@@ -201,12 +197,8 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
     onDispose(dispose);
 
     return (...args: [T | ((value: T) => T)] | []) => {
-        if (value === EMPTY_VALUE) {
-            value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
-        }
-
         if (args.length) {
-            const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(value as T) : args[0];
+            const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(value) : args[0];
 
             if (nextValue !== value) {
                 value = nextValue;
@@ -219,9 +211,11 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
             }
         }
 
-        return value as T;
+        return value;
     };
 };
+
+const EMPTY_VALUE = {};
 
 const createSubscriber = ({ callback = () => {}, level = 0, pure = false }): Subscriber => ({
     cleanups: new Set(),
@@ -370,76 +364,71 @@ export const createSubscription = <T>(
     return dispose;
 };
 
-const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect;
+const reducer = () => ({});
 
-const checkIfSnapshotChanged = <T>(inst: { value: T; getSnapshot: () => T }) => {
-    try {
-        const nextValue = inst.getSnapshot();
-
-        return nextValue !== inst.value;
-    } catch (error) {
-        return true;
-    }
-};
-
-const useSyncExternalStoreShim =
-    typeof useSyncExternalStore === 'undefined'
-        ? <T>(subscribe: (callback: () => void) => () => void, getSnapshot: () => T): T => {
-              const value = getSnapshot();
-              const [{ inst }, forceUpdate] = useState({ inst: { value, getSnapshot } });
-
-              useIsomorphicLayoutEffect(() => {
-                  inst.value = value;
-                  inst.getSnapshot = getSnapshot;
-
-                  if (checkIfSnapshotChanged(inst)) {
-                      forceUpdate({ inst });
-                  }
-              }, [subscribe, value, getSnapshot]);
-              useEffect(() => {
-                  if (checkIfSnapshotChanged(inst)) {
-                      forceUpdate({ inst });
-                  }
-
-                  return subscribe(() => {
-                      if (checkIfSnapshotChanged(inst)) {
-                          forceUpdate({ inst });
-                      }
-                  });
-              }, [inst, subscribe]);
-              useDebugValue(value);
-
-              return value;
-          }
-        : useSyncExternalStore;
+const initialValue = {};
 
 export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const subscriber: Subscriber = useMemo(
-        () => createSubscriber({ callback: () => unsubscribe(subscriber), pure }),
-        [pure],
-    );
+    const [, forceUpdate] = useReducer(reducer, initialValue);
+    const subscriberRef = useRef<Subscriber>();
+    const valueRef = useRef<T | typeof EMPTY_VALUE>(EMPTY_VALUE);
+    const clockRef = useRef<typeof clock>();
+    const selectorRef = useRef(selector);
 
-    return useSyncExternalStoreShim(
-        useCallback(
-            (handleChange) => {
-                subscriber.callback = handleChange;
-
-                return () => unsubscribe(subscriber);
+    if (!subscriberRef.current) {
+        const subscriber = createSubscriber({
+            callback: () => {
+                valueRef.current = EMPTY_VALUE;
+                unsubscribe(subscriber);
             },
-            [subscriber],
-        ),
-        useMemo(() => {
-            let currentClock: typeof clock;
-            let value: T;
+            pure,
+        });
 
-            return () => {
-                if (subscriber.clock !== currentClock || !subscriber.cleanups.size) {
-                    value = autoSubscribe(selector, subscriber);
-                    currentClock = subscriber.clock;
+        subscriberRef.current = subscriber;
+    }
+
+    const subscriber = subscriberRef.current;
+
+    subscriber.pure = pure;
+
+    useEffect(() => {
+        if (valueRef.current === EMPTY_VALUE || clockRef.current !== subscriber.clock) {
+            const nextValue = autoSubscribe(selectorRef.current, subscriber);
+
+            clockRef.current = subscriber.clock;
+
+            if (nextValue !== valueRef.current) {
+                valueRef.current = nextValue;
+                forceUpdate();
+            }
+        }
+
+        subscriber.callback = () => {
+            if (clockRef.current !== subscriber.clock) {
+                const nextValue = autoSubscribe(selectorRef.current, subscriber);
+
+                clockRef.current = subscriber.clock;
+
+                if (nextValue !== valueRef.current) {
+                    valueRef.current = nextValue;
+                    forceUpdate();
                 }
+            }
+        };
 
-                return value;
-            };
-        }, [selector, subscriber]),
-    );
+        return () => {
+            valueRef.current = EMPTY_VALUE;
+            unsubscribe(subscriber);
+        };
+    }, [subscriber]);
+
+    if (valueRef.current === EMPTY_VALUE || selectorRef.current !== selector) {
+        valueRef.current = autoSubscribe(selector, subscriber);
+        clockRef.current = subscriber.clock;
+        selectorRef.current = selector;
+    }
+
+    useDebugValue(valueRef.current);
+
+    return valueRef.current as T;
 };

@@ -76,14 +76,8 @@ Create a signal by calling `createSignal` with initial value:
 ```typescript jsx
 import { createSignal } from 'react-tagged-state';
 
-// with value
 const counter = createSignal(0);
-
-//with function
-const anotherCounter = createSignal(() => 0);
 ```
-
-> 💡 Signal initialize value when you read or write it first time.<br>
 
 Read value by calling a signal without arguments, write value by calling a signal with next value:
 
