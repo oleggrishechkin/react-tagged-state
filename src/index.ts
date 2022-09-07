@@ -365,83 +365,87 @@ export const createSubscription = <T>(
 };
 
 interface State<T> {
-    inst: {
-        subscriber: Subscriber;
-        value: T | typeof EMPTY_VALUE;
-        clock: typeof clock;
-        selector: () => T;
-    };
+    useComputed: ({ selector, pure, forceUpdate }: { selector: () => T; pure: boolean; forceUpdate: () => void }) => T;
 }
 
-const initialize = <T>(selector: () => T): State<T> => {
+const reducer = <T>({ useComputed }: State<T>): State<T> => ({ useComputed });
+
+const initialize = <T>({ selector, pure }: { selector: () => T; pure: boolean }): State<T> => {
+    let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
     const subscriber = createSubscriber({
         callback: () => {
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
-            inst.value = EMPTY_VALUE;
+            value = EMPTY_VALUE;
             unsubscribe(subscriber);
         },
+        pure,
     });
+    let currentClock = subscriber.clock;
+    let currentSelector = selector;
 
-    const inst = {
-        subscriber: subscriber,
-        value: autoSubscribe(selector, subscriber) as T | typeof EMPTY_VALUE,
-        clock: subscriber.clock,
-        selector,
+    value = autoSubscribe(currentSelector, subscriber);
+
+    return {
+        useComputed: ({
+            selector,
+            pure,
+            forceUpdate,
+        }: {
+            selector: () => T;
+            pure: boolean;
+            forceUpdate: () => void;
+        }) => {
+            subscriber.pure = pure;
+
+            useEffect(() => {
+                if (value === EMPTY_VALUE || currentClock !== subscriber.clock) {
+                    const nextValue = autoSubscribe(currentSelector, subscriber);
+
+                    currentClock = subscriber.clock;
+
+                    if (nextValue !== value) {
+                        value = nextValue;
+                        forceUpdate();
+                    }
+                }
+
+                subscriber.callback = () => {
+                    if (currentClock !== subscriber.clock) {
+                        const nextValue = autoSubscribe(currentSelector, subscriber);
+
+                        currentClock = subscriber.clock;
+
+                        if (nextValue !== value) {
+                            value = nextValue;
+                            forceUpdate();
+                        }
+                    }
+                };
+
+                return () => {
+                    value = EMPTY_VALUE;
+                    unsubscribe(subscriber);
+                };
+                // eslint-disable-next-line react-hooks/exhaustive-deps
+            }, []);
+
+            if (value === EMPTY_VALUE || currentSelector !== selector) {
+                value = autoSubscribe(selector, subscriber);
+                currentClock = subscriber.clock;
+                currentSelector = selector;
+            }
+
+            useDebugValue(value);
+
+            return value as T;
+        },
     };
-
-    return { inst };
 };
 
-const reducer = <T>({ inst }: State<T>): State<T> => ({ inst });
-
 export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const [{ inst }, forceUpdate] = useReducer<({ inst }: State<T>) => State<T>, () => T>(
-        reducer,
-        selector,
-        initialize,
-    );
+    const [{ useComputed }, forceUpdate] = useReducer<
+        ({ useComputed }: State<T>) => State<T>,
+        { selector: () => T; pure: boolean }
+    >(reducer, { selector, pure }, initialize);
 
-    inst.subscriber.pure = pure;
-
-    useEffect(() => {
-        if (inst.value === EMPTY_VALUE || inst.clock !== inst.subscriber.clock) {
-            const nextValue = autoSubscribe(inst.selector, inst.subscriber);
-
-            inst.clock = inst.subscriber.clock;
-
-            if (nextValue !== inst.value) {
-                inst.value = nextValue;
-                forceUpdate();
-            }
-        }
-
-        inst.subscriber.callback = () => {
-            if (inst.clock !== inst.subscriber.clock) {
-                const nextValue = autoSubscribe(inst.selector, inst.subscriber);
-
-                inst.clock = inst.subscriber.clock;
-
-                if (nextValue !== inst.value) {
-                    inst.value = nextValue;
-                    forceUpdate();
-                }
-            }
-        };
-
-        return () => {
-            inst.value = EMPTY_VALUE;
-            unsubscribe(inst.subscriber);
-        };
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
-
-    if (inst.value === EMPTY_VALUE || inst.selector !== selector) {
-        inst.value = autoSubscribe(selector, inst.subscriber);
-        inst.clock = inst.subscriber.clock;
-        inst.selector = selector;
-    }
-
-    useDebugValue(inst.value);
-
-    return inst.value as T;
+    return useComputed({ selector, pure, forceUpdate });
 };
