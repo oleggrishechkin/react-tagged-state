@@ -365,10 +365,10 @@ export const createSubscription = <T>(
 };
 
 interface State<T> {
-    useComputed: ({ selector, pure, forceUpdate }: { selector: () => T; pure: boolean; forceUpdate: () => void }) => T;
+    useHook: ({ selector, pure, forceUpdate }: { selector: () => T; pure: boolean; forceUpdate: () => void }) => T;
 }
 
-const reducer = <T>({ useComputed }: State<T>): State<T> => ({ useComputed });
+const reducer = <T>({ useHook }: State<T>): State<T> => ({ useHook });
 
 const initialize = <T>({ selector, pure }: { selector: () => T; pure: boolean }): State<T> => {
     let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
@@ -385,15 +385,7 @@ const initialize = <T>({ selector, pure }: { selector: () => T; pure: boolean })
     value = autoSubscribe(currentSelector, subscriber);
 
     return {
-        useComputed: ({
-            selector,
-            pure,
-            forceUpdate,
-        }: {
-            selector: () => T;
-            pure: boolean;
-            forceUpdate: () => void;
-        }) => {
+        useHook: ({ selector, pure, forceUpdate }: { selector: () => T; pure: boolean; forceUpdate: () => void }) => {
             subscriber.pure = pure;
 
             useEffect(() => {
@@ -428,7 +420,7 @@ const initialize = <T>({ selector, pure }: { selector: () => T; pure: boolean })
                 // eslint-disable-next-line react-hooks/exhaustive-deps
             }, []);
 
-            if (value === EMPTY_VALUE || currentSelector !== selector) {
+            if (value === EMPTY_VALUE || currentSelector !== selector || currentClock !== subscriber.clock) {
                 value = autoSubscribe(selector, subscriber);
                 currentClock = subscriber.clock;
                 currentSelector = selector;
@@ -442,10 +434,10 @@ const initialize = <T>({ selector, pure }: { selector: () => T; pure: boolean })
 };
 
 export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const [{ useComputed }, forceUpdate] = useReducer<
-        ({ useComputed }: State<T>) => State<T>,
+    const [{ useHook }, forceUpdate] = useReducer<
+        ({ useHook }: State<T>) => State<T>,
         { selector: () => T; pure: boolean }
     >(reducer, { selector, pure }, initialize);
 
-    return useComputed({ selector, pure, forceUpdate });
+    return useHook({ selector, pure, forceUpdate });
 };

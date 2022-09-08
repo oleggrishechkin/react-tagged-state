@@ -132,11 +132,19 @@ import {
 } from 'react-tagged-state';
 
 const items = createSignal<
-  Record<string, { id: number; title: string }>
->({ id: { id: 0, title: 'title' } });
+  Partial<
+    Record<string, { id: string; title: string }>
+  >
+>({ id: { id: '0', title: 'title' } });
 
-const Item = ({ itemId }: { itemId: number }) => {
-  const item = useSelector(() => items()[itemId]);
+const Item = ({ itemId }: { itemId: string }) => {
+  const item = useSelector(
+    () => items()?.[itemId],
+  );
+
+  if (!item) {
+    return null;
+  }
 
   return <div>{item.title}</div>;
 };
@@ -234,10 +242,6 @@ sync();
 ```
 
 > 💡 `sync` called automatically when you read any computed.
-
-## Concurrent Mode
-
-Partial concurrent mode support via `useSyncExternalStore`.
 
 ## Example
 
