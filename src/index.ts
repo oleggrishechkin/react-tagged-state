@@ -1,4 +1,5 @@
-import { useEffect, useDebugValue, useReducer } from 'react';
+import { useSyncExternalStore } from 'use-sync-external-store/shim';
+import { useRef } from 'react';
 
 export interface Signal<T> {
     (): T;
@@ -9,435 +10,466 @@ export interface Computed<T> {
     (): T;
 }
 
-interface Subscriber {
-    cleanups: Set<(subscriber: Subscriber) => any>;
-    disposes: (() => any)[] | null;
-    callback: () => void;
-    clock: typeof clock;
-    level: number;
-    pure: boolean;
-}
+const EMPTY_VALUE = {};
 
-let canSync = true;
+let clock = 0;
 
-let queue: Subscriber[][] | null = null;
+let currentSubscriber: ComputedNode<any> | null = null;
 
-let clock = {};
-
-const runSubscribers = (subscribers: Subscriber[]) => {
-    if (subscribers) {
-        for (let index = 0; index < subscribers.length; index++) {
-            const subscriber = subscribers[index];
-
-            if (subscriber.clock !== clock) {
-                subscriber.clock = clock;
-                subscriber.callback();
-            }
-        }
-    }
-};
+let queue: SignalNode<any>[] | null = null;
 
 let promise: Promise<void> | null = null;
 
-export const sync = (): void => {
-    if (canSync) {
-        if (queue) {
-            while (queue) {
-                clock = {};
-                canSync = false;
-
-                for (let level = 1; level < queue.length; level++) {
-                    runSubscribers(queue[level]);
-                }
-
-                canSync = true;
-
-                const subscribers = queue[0];
-
-                queue = null;
-                runSubscribers(subscribers);
-            }
+export function sync(): void {
+    if (!queue) {
+        if (promise) {
+            promise = null;
         }
 
+        return;
+    }
+
+    for (let index = 0; index < queue.length; index++) {
+        for (let node = queue[index].subscribersList; node; node = node.nextSubscriber) {
+            node.subscriber.run();
+        }
+    }
+
+    queue = null;
+
+    if (promise) {
         promise = null;
     }
-};
+}
 
-const schedule = (subscribers: Set<Subscriber>) => {
-    if (subscribers.size) {
-        if (!queue) {
-            queue = [];
-        }
-
-        for (const subscriber of subscribers) {
-            if (queue[subscriber.level]) {
-                queue[subscriber.level].push(subscriber);
-            } else {
-                queue[subscriber.level] = [subscriber];
-            }
-        }
-
-        if (!promise) {
-            const nextPromise = Promise.resolve().then(() => {
-                if (nextPromise === promise) {
-                    sync();
-                }
-            });
-
-            promise = nextPromise;
-        }
-    }
-};
-
-const runDisposes = (subscriber: Subscriber) => {
-    if (subscriber.disposes) {
-        for (let index = 0; index < subscriber.disposes.length; index++) {
-            subscriber.disposes[index]();
-        }
-
-        subscriber.disposes = null;
-    }
-};
-
-const unsubscribe = (subscriber: Subscriber) => {
-    runDisposes(subscriber);
-    subscriber.clock = clock;
-
-    if (subscriber.cleanups.size) {
-        for (const cleanup of subscriber.cleanups) {
-            cleanup(subscriber);
-        }
-
-        subscriber.cleanups.clear();
-
-        if (subscriber.level) {
-            subscriber.level = 1;
-        }
-    }
-};
-
-let currentParent: Subscriber | null = null;
-
-let currentSubscriber: Subscriber | null = null;
-
-const autoSubscribe = <T>(func: () => T, subscriber: Subscriber): T => {
-    runDisposes(subscriber);
-    subscriber.clock = clock;
-
-    let cleanups;
-
-    if (subscriber.cleanups.size && !subscriber.pure) {
-        cleanups = Array.from(subscriber.cleanups);
-
-        subscriber.cleanups.clear();
-
-        if (subscriber.level) {
-            subscriber.level = 1;
-        }
+export function sample<T>(compute: () => T) {
+    if (!currentSubscriber) {
+        return compute();
     }
 
-    const prevParent = currentParent;
-    const prevSubscriber = currentSubscriber;
-
-    currentParent = subscriber;
-    currentSubscriber = subscriber;
-
-    const value = func();
-
-    currentParent = prevParent;
-    currentSubscriber = prevSubscriber;
-
-    if (cleanups) {
-        for (let index = 0; index < cleanups.length; index++) {
-            if (!subscriber.cleanups.has(cleanups[index])) {
-                cleanups[index](subscriber);
-            }
-        }
-    }
-
-    return value;
-};
-
-export const sample = <T>(func: () => T): T => {
     const prevSubscriber = currentSubscriber;
 
     currentSubscriber = null;
 
-    const value = func();
+    const value = compute();
 
     currentSubscriber = prevSubscriber;
 
     return value;
-};
-
-const onDispose = (dispose: () => void) => {
-    if (currentParent) {
-        if (currentParent.disposes) {
-            currentParent.disposes.push(dispose);
-        } else {
-            currentParent.disposes = [dispose];
-        }
-    }
-};
-
-export const createSignal = <T>(initialValue: T): Signal<T> => {
-    let value = initialValue;
-    const subscribers = new Set<Subscriber>();
-    const cleanup = (subscriberNode: Subscriber) => subscribers.delete(subscriberNode);
-    const dispose = () => {
-        if (subscribers.size) {
-            for (const subscriberNode of subscribers) {
-                subscriberNode.cleanups.delete(cleanup);
-            }
-
-            subscribers.clear();
-        }
-    };
-
-    onDispose(dispose);
-
-    return (...args: [T | ((value: T) => T)] | []) => {
-        if (args.length) {
-            const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(value) : args[0];
-
-            if (nextValue !== value) {
-                value = nextValue;
-                schedule(subscribers);
-            }
-        } else {
-            if (currentSubscriber) {
-                subscribers.add(currentSubscriber);
-                currentSubscriber.cleanups.add(cleanup);
-            }
-        }
-
-        return value;
-    };
-};
-
-const EMPTY_VALUE = {};
-
-const createSubscriber = ({ callback = () => {}, level = 0, pure = false }): Subscriber => ({
-    cleanups: new Set(),
-    disposes: null,
-    callback,
-    clock,
-    level,
-    pure,
-});
-
-export const createComputed = <T>(
-    selector: () => T,
-    { lazy = true, pure = false }: { lazy?: boolean; pure?: boolean } = {},
-): Computed<T> => {
-    let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
-    const subscribers = new Set<Subscriber>();
-    const subscriber = createSubscriber({
-        callback: () => {
-            if (!subscribers.size && lazy) {
-                // eslint-disable-next-line @typescript-eslint/no-use-before-define
-                dispose();
-            } else {
-                const prevLevel = subscriber.level;
-                const nextValue = autoSubscribe(selector, subscriber);
-
-                subscriber.level = Math.max(prevLevel, subscriber.level);
-
-                if (nextValue !== value) {
-                    value = nextValue;
-                    schedule(subscribers);
-                }
-            }
-        },
-        level: 1,
-        pure,
-    });
-    const cleanup = (subscriberNode: Subscriber) => {
-        subscribers.delete(subscriberNode);
-
-        if (!subscribers.size && lazy) {
-            // eslint-disable-next-line @typescript-eslint/no-use-before-define
-            dispose();
-        }
-    };
-    const dispose = () => {
-        value = EMPTY_VALUE;
-
-        if (subscribers.size) {
-            for (const subscriberNode of subscribers) {
-                subscriberNode.cleanups.delete(cleanup);
-            }
-
-            subscribers.clear();
-        }
-
-        unsubscribe(subscriber);
-    };
-
-    onDispose(dispose);
-
-    if (!lazy) {
-        value = autoSubscribe(selector, subscriber);
-    }
-
-    return () => {
-        if (canSync) {
-            sync();
-        }
-
-        if (value === EMPTY_VALUE) {
-            value = autoSubscribe(selector, subscriber);
-        }
-
-        if (currentSubscriber) {
-            subscribers.add(currentSubscriber);
-            currentSubscriber.cleanups.add(cleanup);
-
-            if (currentSubscriber.level) {
-                currentSubscriber.level = Math.max(currentSubscriber.level, subscriber.level + 1);
-            }
-        }
-
-        return value as T;
-    };
-};
-
-const runCleanup = (cleanup: void | (() => void)) => {
-    if (typeof cleanup === 'function') {
-        cleanup();
-    }
-};
-
-export const createEffect = (
-    callback: () => void | (() => void),
-    { pure = false }: { pure?: boolean } = {},
-): (() => void) => {
-    let cleanup: void | (() => void);
-    const subscriber = createSubscriber({
-        callback: () => {
-            runCleanup(cleanup);
-            cleanup = autoSubscribe(callback, subscriber);
-        },
-        pure,
-    });
-    const dispose = () => {
-        runCleanup(cleanup);
-        cleanup = void 0;
-        unsubscribe(subscriber);
-    };
-
-    onDispose(dispose);
-    cleanup = autoSubscribe(callback, subscriber);
-
-    return dispose;
-};
-
-export const createSubscription = <T>(
-    selector: () => T,
-    callback: (value: T) => void | (() => void),
-    { pure = false }: { pure?: boolean } = {},
-): (() => void) => {
-    let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
-    let cleanup: void | (() => void);
-    const subscriber = createSubscriber({
-        callback: () => {
-            const nextValue = autoSubscribe(selector, subscriber);
-
-            if (nextValue !== value) {
-                value = nextValue;
-                runCleanup(cleanup);
-                cleanup = callback(value);
-            }
-        },
-        pure,
-    });
-    const dispose = () => {
-        value = EMPTY_VALUE;
-        runCleanup(cleanup);
-        cleanup = void 0;
-        unsubscribe(subscriber);
-    };
-
-    onDispose(dispose);
-    value = autoSubscribe(selector, subscriber);
-
-    return dispose;
-};
-
-interface State<T> {
-    useHook: ({ selector, pure, forceUpdate }: { selector: () => T; pure: boolean; forceUpdate: () => void }) => T;
 }
 
-const reducer = <T>({ useHook }: State<T>): State<T> => ({ useHook });
+class RelationNode {
+    version: number;
+    signal: SignalNode<any>;
+    subscriber: ComputedNode<any>;
+    nextSignal: RelationNode | null;
+    prevSignal: RelationNode | null;
+    nextSubscriber: RelationNode | null;
+    prevSubscriber: RelationNode | null;
+    prevRelation: RelationNode | null;
+    active: boolean;
+    subscribed: boolean;
 
-const initialize = <T>({ selector, pure }: { selector: () => T; pure: boolean }): State<T> => {
-    let value: T | typeof EMPTY_VALUE = EMPTY_VALUE;
-    const subscriber = createSubscriber({
-        callback: () => {
-            value = EMPTY_VALUE;
-            unsubscribe(subscriber);
-        },
-        pure,
-    });
-    let currentClock = subscriber.clock;
-    let currentSelector = selector;
+    constructor(signal: SignalNode<any>, subscriber: ComputedNode<any>) {
+        this.version = signal.version;
+        this.signal = signal;
+        this.subscriber = subscriber;
+        this.nextSignal = subscriber.signalsList;
+        this.prevSignal = null;
+        this.nextSubscriber = null;
+        this.prevSubscriber = null;
+        this.prevRelation = signal.relation;
+        this.active = true;
+        this.subscribed = false;
+        signal.relation = this;
+        subscriber.signalsList = this;
 
-    value = autoSubscribe(currentSelector, subscriber);
+        if (this.nextSignal) {
+            this.nextSignal.prevSignal = this;
+        }
 
-    return {
-        useHook: ({ selector, pure, forceUpdate }: { selector: () => T; pure: boolean; forceUpdate: () => void }) => {
-            subscriber.pure = pure;
+        if (subscriber.subscribersList !== null) {
+            this.addToSignal();
+        }
+    }
 
-            useEffect(() => {
-                if (value === EMPTY_VALUE || currentClock !== subscriber.clock) {
-                    const nextValue = autoSubscribe(currentSelector, subscriber);
+    removeFromSubscriber(this: RelationNode) {
+        if (this.prevSignal) {
+            this.prevSignal.nextSignal = this.nextSignal;
 
-                    currentClock = subscriber.clock;
-
-                    if (nextValue !== value) {
-                        value = nextValue;
-                        forceUpdate();
-                    }
-                }
-
-                subscriber.callback = () => {
-                    if (currentClock !== subscriber.clock) {
-                        const nextValue = autoSubscribe(currentSelector, subscriber);
-
-                        currentClock = subscriber.clock;
-
-                        if (nextValue !== value) {
-                            value = nextValue;
-                            forceUpdate();
-                        }
-                    }
-                };
-
-                return () => {
-                    value = EMPTY_VALUE;
-                    unsubscribe(subscriber);
-                };
-                // eslint-disable-next-line react-hooks/exhaustive-deps
-            }, []);
-
-            if (value === EMPTY_VALUE || currentSelector !== selector || currentClock !== subscriber.clock) {
-                value = autoSubscribe(selector, subscriber);
-                currentClock = subscriber.clock;
-                currentSelector = selector;
+            if (this.nextSignal) {
+                this.nextSignal.prevSignal = this.prevSignal;
             }
 
-            useDebugValue(value);
+            return;
+        }
 
-            return value as T;
-        },
+        this.subscriber.signalsList = this.nextSignal;
+
+        if (this.nextSignal) {
+            this.nextSignal.prevSignal = null;
+        }
+    }
+
+    addToSignal() {
+        if (this.subscribed) {
+            return;
+        }
+
+        this.subscribed = true;
+        this.nextSubscriber = this.signal.subscribersList!;
+        this.signal.subscribersList = this;
+
+        if (this.nextSubscriber) {
+            this.nextSubscriber.prevSubscriber = this;
+        } else {
+            this.signal.subscribe();
+        }
+    }
+
+    removeFromSignal() {
+        if (!this.subscribed) {
+            return;
+        }
+
+        this.subscribed = false;
+
+        if (this.prevSubscriber) {
+            this.prevSubscriber.nextSubscriber = this.nextSubscriber;
+
+            if (this.nextSubscriber) {
+                this.nextSubscriber.prevSubscriber = this.prevSubscriber;
+            }
+
+            return;
+        }
+
+        this.signal.subscribersList = this.nextSubscriber;
+
+        if (this.nextSubscriber) {
+            this.nextSubscriber.prevSubscriber = null;
+        } else {
+            this.signal.unsubscribe();
+        }
+    }
+}
+
+class SignalNode<T> {
+    value: T;
+    version: number;
+    relation: RelationNode | null;
+    subscribersList?: RelationNode | null;
+
+    constructor(initialValue: T) {
+        this.value = initialValue;
+        this.version = 0;
+        this.relation = null;
+        this.subscribersList = null;
+    }
+
+    track() {
+        if (!currentSubscriber) {
+            return;
+        }
+
+        if (!this.relation || this.relation.subscriber !== currentSubscriber) {
+            new RelationNode(this, currentSubscriber);
+
+            return;
+        }
+
+        this.relation.active = true;
+        this.relation.version = this.version;
+    }
+
+    notify() {
+        if (!this.subscribersList) {
+            return;
+        }
+
+        if (queue) {
+            queue.push(this);
+        } else {
+            queue = [this];
+        }
+
+        if (promise) {
+            return;
+        }
+
+        const nextPromise = Promise.resolve().then(() => {
+            if (nextPromise === promise) {
+                sync();
+            }
+        });
+
+        promise = nextPromise;
+    }
+
+    subscribe() {}
+
+    unsubscribe() {}
+
+    recompute() {}
+
+    call(...args: [] | [T | ((value: T) => T)]) {
+        if (args.length) {
+            const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(this.value) : args[0];
+
+            if (nextValue !== this.value) {
+                this.value = nextValue;
+                this.version++;
+                clock++;
+                this.notify();
+            }
+
+            return this.value;
+        }
+
+        this.track();
+
+        return this.value;
+    }
+}
+
+class ComputedNode<T> extends SignalNode<T> {
+    compute: () => T;
+    clock: number;
+    signalsList: RelationNode | null;
+    children: ComputedNode<any>[] | null;
+
+    constructor(compute: () => T) {
+        super(EMPTY_VALUE as T);
+        this.compute = compute;
+        this.clock = -1;
+        this.signalsList = null;
+        this.children = null;
+
+        if (!currentSubscriber) {
+            return;
+        }
+
+        if (currentSubscriber.children) {
+            currentSubscriber.children.push(this);
+
+            return;
+        }
+
+        currentSubscriber.children = [this];
+    }
+
+    subscribe() {
+        for (let node = this.signalsList; node; node = node.nextSignal) {
+            node.addToSignal();
+        }
+    }
+
+    cleanup() {
+        if (!this.children) {
+            return;
+        }
+
+        const length = this.children.length;
+
+        for (let index = 0; index < length; index++) {
+            this.children[index].unsubscribe();
+        }
+
+        this.children = null;
+    }
+
+    unsubscribe() {
+        for (let node = this.signalsList; node; node = node.nextSignal) {
+            node.removeFromSignal();
+        }
+
+        this.cleanup();
+    }
+
+    recompute(force?: boolean) {
+        if (clock === this.clock) {
+            return;
+        }
+
+        this.clock = clock;
+
+        if (this.signalsList && !force) {
+            let node = this.signalsList as RelationNode | null;
+
+            for (; node; node = node.nextSignal) {
+                if (node.version !== node.signal.version) {
+                    break;
+                }
+
+                node.signal.recompute();
+
+                if (node.version !== node.signal.version) {
+                    break;
+                }
+            }
+
+            if (!node) {
+                return;
+            }
+        }
+
+        this.cleanup();
+
+        for (let node = this.signalsList; node; node = node.nextSignal) {
+            node.active = false;
+            node.prevRelation = node.signal.relation;
+            node.signal.relation = node;
+        }
+
+        const prevSubscriber = currentSubscriber;
+
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        currentSubscriber = this;
+
+        const nextValue = this.compute();
+
+        currentSubscriber = prevSubscriber;
+
+        for (let node = this.signalsList; node; node = node.nextSignal) {
+            if (node.active) {
+                node.signal.relation = node.prevRelation;
+                node.prevRelation = null;
+
+                continue;
+            }
+
+            node.removeFromSubscriber();
+            node.removeFromSignal();
+        }
+
+        if (nextValue !== this.value) {
+            this.value = nextValue;
+            this.version++;
+            this.notify();
+        }
+    }
+
+    run() {
+        this.recompute(true);
+    }
+
+    call() {
+        this.recompute();
+        this.track();
+
+        return this.value;
+    }
+}
+
+class EffectNode extends ComputedNode<(() => void) | void> {
+    constructor(compute: () => (() => void) | void) {
+        super(compute);
+        this.subscribersList = undefined;
+        this.recompute(true);
+    }
+
+    notify() {}
+
+    cleanup() {
+        super.cleanup();
+
+        if (typeof this.value === 'function') {
+            this.value();
+        }
+    }
+}
+
+class SubscriptionNode<T> extends ComputedNode<T> {
+    callback: (value: T) => void;
+
+    constructor(compute: () => T, callback: (value: T) => void) {
+        super(compute);
+        this.subscribersList = undefined;
+        this.callback = callback;
+        this.recompute(true);
+    }
+
+    _notify() {
+        this.callback(this.value);
+    }
+
+    notify() {
+        this.notify = this._notify;
+    }
+}
+
+class SyncExternalStoreNode<T> extends ComputedNode<T> {
+    callback?: () => void;
+    outdated: boolean;
+
+    constructor(compute: () => T) {
+        super(compute);
+        this.outdated = true;
+    }
+
+    notify() {}
+
+    run() {
+        this.outdated = true;
+
+        if (this.callback) {
+            this.callback();
+        }
+    }
+
+    storeSubscribe = (onStoreChange: () => void) => {
+        this.subscribersList = undefined;
+        this.callback = onStoreChange;
+        this.subscribe();
+
+        return this.unsubscribe.bind(this);
     };
-};
 
-export const useSelector = <T>(selector: () => T, { pure = false }: { pure?: boolean } = {}): T => {
-    const [{ useHook }, forceUpdate] = useReducer<
-        ({ useHook }: State<T>) => State<T>,
-        { selector: () => T; pure: boolean }
-    >(reducer, { selector, pure }, initialize);
+    storeGetSnapshot = () => {
+        this.recompute(this.outdated);
+        this.outdated = false;
 
-    return useHook({ selector, pure, forceUpdate });
-};
+        return this.value;
+    };
+}
+
+export function createSignal<T>(initialValue: T): Signal<T> {
+    const signalNode = new SignalNode(initialValue);
+
+    return signalNode.call.bind(signalNode);
+}
+
+export function createComputed<T>(compute: () => T): Computed<T> {
+    const computedNode = new ComputedNode(compute);
+
+    return computedNode.call.bind(computedNode);
+}
+
+export function createEffect(compute: () => (() => void) | void): () => void {
+    const effectNode = new EffectNode(compute);
+
+    return effectNode.unsubscribe.bind(effectNode);
+}
+
+export function createSubscription<T>(compute: () => T, callback: (value: T) => void): () => void {
+    const subscriptionNode = new SubscriptionNode(compute, callback);
+
+    return subscriptionNode.unsubscribe.bind(subscriptionNode);
+}
+
+export function useSelector<T>(selector: () => T): T {
+    const syncExternalStoreNode = useRef<SyncExternalStoreNode<T> | null>(null);
+
+    if (syncExternalStoreNode.current === null) {
+        syncExternalStoreNode.current = new SyncExternalStoreNode(selector);
+    } else if (syncExternalStoreNode.current.compute !== selector) {
+        syncExternalStoreNode.current.compute = selector;
+        syncExternalStoreNode.current.clock = -1;
+        syncExternalStoreNode.current.outdated = true;
+    }
+
+    return useSyncExternalStore(
+        syncExternalStoreNode.current.storeSubscribe,
+        syncExternalStoreNode.current.storeGetSnapshot,
+    );
+}

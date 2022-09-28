@@ -1,6 +1,6 @@
 {
     "name": "react-tagged-state",
-    "version": "1.21.2",
+    "version": "1.22.0",
     "description": "⚛️ Experimental reactive and atomic state manager",
     "keywords": [
         "react",
@@ -35,9 +35,13 @@
         "prettier:fix:readme": "prettier --tab-width 2 --print-width 50 --write README.md",
         "prepare": "husky install && rimraf lib && tsc"
     },
+    "dependencies": {
+        "use-sync-external-store": "^1.2.0"
+    },
     "devDependencies": {
         "@types/react": "^18.0.15",
         "@types/react-dom": "^18.0.6",
+        "@types/use-sync-external-store": "^0.0.3",
         "configs-og": "^4.0.0",
         "eslint": "^8.23.0",
         "husky": "^8.0.1",
