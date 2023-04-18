@@ -1,10 +1,12 @@
-import { useSyncExternalStore } from 'react';
+import { useMemo, useSyncExternalStore } from 'react';
 
 const VALUE = Symbol();
 
 const SUBSCRIBERS = Symbol();
 
 const SUBSCRIBE = Symbol();
+
+const ROOT = Symbol();
 
 export type Callback<T> = (value: T) => void;
 
@@ -21,8 +23,9 @@ export interface SignalRW<T> {
     [SUBSCRIBE]: (callback: Callback<T>) => () => void;
 }
 
+// @ts-expect-error ROOT
 // eslint-disable-next-line @typescript-eslint/no-use-before-define
-const updateEvent = createSignal<void>();
+const rootSignal = createSignal({}, ROOT);
 
 function signalWFunction<T>(this: { [SUBSCRIBERS]: Subscribers<T> }, updater: T) {
     if (this[SUBSCRIBERS]) {
@@ -33,7 +36,7 @@ function signalWFunction<T>(this: { [SUBSCRIBERS]: Subscribers<T> }, updater: T)
 }
 
 function signalRWFunction<T>(
-    this: { [VALUE]: T; [SUBSCRIBERS]: Subscribers<T> },
+    this: { [VALUE]: T; [SUBSCRIBERS]: Subscribers<T>; [ROOT]: boolean },
     ...args: [] | [T] | [(value: T) => T]
 ) {
     if (args.length) {
@@ -48,7 +51,9 @@ function signalRWFunction<T>(
                 }
             }
 
-            updateEvent();
+            if (!this[ROOT]) {
+                rootSignal({});
+            }
         }
 
         return;
@@ -80,8 +85,10 @@ function subscribeFunction<T>(this: { [SUBSCRIBERS]: Subscribers<T> }, callback:
 
 export function createSignal<T>(initialValue: T): SignalRW<T>;
 export function createSignal<T = void>(): SignalW<T>;
-export function createSignal<T>(...args: [] | [T]): any {
-    const data = args.length ? { [VALUE]: args[0], [SUBSCRIBERS]: null } : { [SUBSCRIBERS]: null };
+export function createSignal<T>(...args: [] | [T] | [T, typeof ROOT]): any {
+    const data = args.length
+        ? { [VALUE]: args[0], [SUBSCRIBERS]: null, [ROOT]: args[1] === ROOT }
+        : { [SUBSCRIBERS]: null };
     const signal = (args.length ? signalRWFunction : signalWFunction).bind(data);
 
     Object.defineProperty(signal, SUBSCRIBE, { value: subscribeFunction.bind(data) });
@@ -96,9 +103,33 @@ export function subscribe<T>(signal: SignalRW<T> | SignalW<T>, callback: Callbac
 export function useSelector<T, K>(signal: SignalRW<T>, selector: (value: T) => K): K;
 export function useSelector<T>(signal: SignalRW<T>): T;
 export function useSelector<T>(selector: () => T): T;
-export function useSelector<T>(signal: SignalRW<T> | (() => T), selector?: (value: T) => T) {
+export function useSelector<T, K>(signal: SignalRW<T> | (() => T), selector?: (value: T) => K) {
+    const isSignal = SUBSCRIBE in signal;
+    const snapshotSignal = (isSignal ? signal : rootSignal) as SignalRW<T>;
+    const snapshotSelector = selector || (isSignal ? null : signal);
+
     return useSyncExternalStore(
-        (signal as SignalRW<T>)[SUBSCRIBE] || updateEvent[SUBSCRIBE],
-        selector ? () => selector(signal()) : signal,
+        snapshotSignal[SUBSCRIBE],
+        useMemo(() => {
+            if (snapshotSelector) {
+                let value: any = {};
+                let selected: T | K;
+
+                return () => {
+                    const nextValue = snapshotSignal();
+
+                    if (nextValue === value) {
+                        return selected;
+                    }
+
+                    value = nextValue;
+                    selected = snapshotSelector(nextValue);
+
+                    return selected;
+                };
+            }
+
+            return snapshotSignal;
+        }, [snapshotSignal, snapshotSelector]),
     );
 }
