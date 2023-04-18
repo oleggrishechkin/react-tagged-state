@@ -7,13 +7,9 @@
 [![NPM total downloads](https://img.shields.io/npm/dt/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-tagged-state?minimal=true)
 [![NPM monthly downloads](https://img.shields.io/npm/dm/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-tagged-state?minimal=true)
 
-⚛️ Experimental reactive and atomic state manager
+⚛️ Experimental global atomic state manager
 
-**React Tagged State** uses the same reactivity pattern as [SolidJS](https://www.solidjs.com/) and [S.js](https://github.com/adamhaile/S) but optimized for usage with React.
-
-- Updates batched automatically.
-- Affected subscribers called only once per batch.
-- Lazy computed.
+**React Tagged State** uses signals API as [SolidJS](https://www.solidjs.com/) and [S.js](https://github.com/adamhaile/S) but without smart reactivity with effects and computed.
 
 ## Basic Usage
 
@@ -40,36 +36,9 @@ const Counter = () => {
 };
 ```
 
-## Introduction
-
-Base part of React Tagged State is a signals and effects.<br>
-Signal is a value container. It can read and write value.<br>
-Effect is an observer. It automatically tracks what signals was read inside it and call self anytime when any of these signals changed.
-
-```typescript jsx
-import {
-  createSignal,
-  createEffect,
-} from 'react-tagged-state';
-
-const initialValue = 0;
-
-const counter = createSignal(initialValue);
-
-createEffect(() => {
-  console.log('counter changed: ', counter());
-});
-
-counter(10); // counter changed: 10
-
-counter((count) => count + 1); // counter changed: 11
-
-counter(initialValue); // counter changed: 0
-```
-
 ## API Overview
 
-### Signals
+### createSignal
 
 Create a signal by calling `createSignal` with initial value:
 
@@ -79,7 +48,7 @@ import { createSignal } from 'react-tagged-state';
 const counter = createSignal(0);
 ```
 
-Read value by calling a signal without arguments, write value by calling a signal with next value:
+Read value by calling a signal without arguments, write value by calling a signal with new value:
 
 ```typescript jsx
 import { createSignal } from 'react-tagged-state';
@@ -96,9 +65,43 @@ counter(10);
 counter((count) => count + 1);
 ```
 
-### React & Hooks
+You can create an event like signal by calling `createSignal` without initial value:
 
-Subscribe component to a signal, computed or selector by calling `useSelector`:
+```typescript jsx
+import { createSignal } from 'react-tagged-state';
+
+const reset = createSignal();
+```
+
+Dispatch event by calling a signal:
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+const reset = createSignal();
+
+reset();
+```
+
+You can dispatch some payload too:
+
+```typescript
+import { createSignal } from 'react-tagged-state';
+
+const reduxLikeDispatch = createSignal<{
+  type: sring;
+  payload: any;
+}>();
+
+reduxLikeDispatch({
+  type: 'SET_COUNTER',
+  payload: 5,
+});
+```
+
+### useSelector
+
+Subscribe component to a signal by calling `useSelector`:
 
 ```typescript jsx
 import {
@@ -123,7 +126,9 @@ const Counter = () => {
 };
 ```
 
-Use props inside `useSelector`:
+Component will be re-rendered on signal's value change.
+
+You can map value from signal:
 
 ```typescript jsx
 import {
@@ -139,7 +144,8 @@ const items = createSignal<
 
 const Item = ({ itemId }: { itemId: string }) => {
   const item = useSelector(
-    () => items()?.[itemId],
+    items,
+    (value) => value[itemId],
   );
 
   if (!item) {
@@ -150,73 +156,52 @@ const Item = ({ itemId }: { itemId: string }) => {
 };
 ```
 
-### Computed
-
-Create a computed by calling `createComputed` with selector:
+Selectors supported too:
 
 ```typescript jsx
 import {
   createSignal,
-  createComputed,
+  useSelector,
 } from 'react-tagged-state';
 
-const counter = createSignal(0);
+const items = createSignal<
+  Partial<
+    Record<string, { id: string; title: string }>
+  >
+>({ id: { id: '0', title: 'title' } });
 
-const doubledCounter = createComputed(
-  () => counter() * 2,
-);
+const Item = ({ itemId }: { itemId: string }) => {
+  const item = useSelector(() => items()[itemId]);
+
+  if (!item) {
+    return null;
+  }
+
+  return <div>{item.title}</div>;
+};
 ```
 
-> 💡 Computed select value when you read it first time or when its dependencies changed. Computed unsubscribed automatically when nothing depends on it.
+Component will be re-rendered on selected/mapped value change.
 
-Read value by calling a computed without arguments:
+> 💡 Your selector/map function may be called frequently so keep it as simple as possible. You can move heavy computations to `useMemo`.
+> 
+> Rules:<br>
+> - selector function will be called on any signal change/on each render.<br>
+> - map function will be called on provided signal change/on each render.
 
-```typescript jsx
-import {
-  createSignal,
-  createComputed,
-} from 'react-tagged-state';
+### subscribe
 
-const counter = createSignal(0);
-
-const doubledCounter = createComputed(
-  () => counter() * 2,
-);
-
-// read
-const value = doubledCounter();
-```
-
-### Effects
-
-Create an effect by calling `createEffect` with callback:
+Subscribe to a signal by calling `subscribe` with signal and callback:
 
 ```typescript jsx
 import {
   createSignal,
-  createEffect,
+  subscribe,
 } from 'react-tagged-state';
 
 const counter = createSignal(0);
 
-const unsubscribe = createEffect(() => {
-  console.log(counter());
-});
-```
-
-### Subscriptions
-
-Create a subscription by calling `createSubscription` with signal, computed or selector and callback:
-
-```typescript jsx
-import {
-  createSignal,
-  createSubscription,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-const unsubscribe = createSubscription(
+const unsubscribe = subscribe(
   counter,
   (value) => {
     console.log(value);
@@ -224,24 +209,7 @@ const unsubscribe = createSubscription(
 );
 ```
 
-### Batching
-
-Updates batched automatically via microtask. Run batched updates immediately by calling `sync`:
-
-```typescript jsx
-import {
-  createSignal,
-  sync,
-} from 'react-tagged-state';
-
-const counter = createSignal(0);
-
-counter(10);
-
-sync();
-```
-
-> 💡 `sync` called automatically when you read any computed.
+Callback will be called on signal's value change.
 
 ## Example
 
