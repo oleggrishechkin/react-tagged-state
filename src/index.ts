@@ -1,135 +1,96 @@
 import { useMemo, useSyncExternalStore } from 'react';
 
-const VALUE = Symbol();
-
-const SUBSCRIBERS = Symbol();
-
-const SUBSCRIBE = Symbol();
-
-const ROOT = Symbol();
-
-export type Callback<T> = (value: T) => void;
-
-type Subscribers<T> = Set<Callback<T>> | null;
-
-export interface SignalW<T> {
-    (updater: T): void;
-    [SUBSCRIBE]: (callback: Callback<T>) => () => void;
+export interface Event<T> {
+    (nextValue: T): void;
+    on: (callback: (value: T) => void) => () => void;
 }
 
-export interface SignalRW<T> {
+export interface Signal<T> {
     (): T;
-    (updater: T | ((value: T) => T)): T;
-    [SUBSCRIBE]: (callback: Callback<T>) => () => void;
+    (nextValue: T | ((value: T) => T)): void;
+    on: (callback: (value: T) => void) => () => void;
 }
 
-// @ts-expect-error ROOT
-// eslint-disable-next-line @typescript-eslint/no-use-before-define
-const rootSignal = createSignal({}, ROOT);
+export const createEvent = <T = void>(): Event<T> => {
+    let callbacks: Set<(value: T) => void> | null = null;
 
-function signalWFunction<T>(this: { [SUBSCRIBERS]: Subscribers<T> }, updater: T) {
-    if (this[SUBSCRIBERS]) {
-        for (const subscriber of this[SUBSCRIBERS]) {
-            subscriber(updater);
-        }
-    }
-}
-
-function signalRWFunction<T>(
-    this: { [VALUE]: T; [SUBSCRIBERS]: Subscribers<T>; [ROOT]: boolean },
-    ...args: [] | [T] | [(value: T) => T]
-) {
-    if (args.length) {
-        const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(this[VALUE]) : args[0];
-
-        if (nextValue !== this[VALUE]) {
-            this[VALUE] = nextValue;
-
-            if (this[SUBSCRIBERS]) {
-                for (const subscriber of this[SUBSCRIBERS]) {
-                    subscriber(nextValue);
+    return Object.assign(
+        (value: T) => {
+            if (callbacks) {
+                for (const callback of callbacks) {
+                    callback(value);
                 }
             }
+        },
+        {
+            on: (callback: (value: T) => void) => {
+                if (!callbacks) {
+                    callbacks = new Set();
+                }
 
-            if (!this[ROOT]) {
-                rootSignal({});
-            }
-        }
-
-        return;
-    }
-
-    return this[VALUE];
-}
-
-function unsubscribeFunction<T>(this: { [SUBSCRIBERS]: Subscribers<T> }, callback: Callback<T>) {
-    if (this[SUBSCRIBERS]) {
-        this[SUBSCRIBERS].delete(callback);
-
-        if (!this[SUBSCRIBERS].size) {
-            this[SUBSCRIBERS] = null;
-        }
-    }
-}
-
-function subscribeFunction<T>(this: { [SUBSCRIBERS]: Subscribers<T> }, callback: Callback<T>) {
-    if (!this[SUBSCRIBERS]) {
-        this[SUBSCRIBERS] = new Set();
-    }
-
-    this[SUBSCRIBERS].add(callback);
-
-    // @ts-expect-error unknown
-    return unsubscribeFunction.bind(this, callback);
-}
-
-export function createSignal<T>(initialValue: T): SignalRW<T>;
-export function createSignal<T = void>(): SignalW<T>;
-export function createSignal<T>(...args: [] | [T] | [T, typeof ROOT]): any {
-    const data = args.length
-        ? { [VALUE]: args[0], [SUBSCRIBERS]: null, [ROOT]: args[1] === ROOT }
-        : { [SUBSCRIBERS]: null };
-    const signal = (args.length ? signalRWFunction : signalWFunction).bind(data);
-
-    Object.defineProperty(signal, SUBSCRIBE, { value: subscribeFunction.bind(data) });
-
-    return signal;
-}
-
-export function subscribe<T>(signal: SignalRW<T> | SignalW<T>, callback: Callback<T>) {
-    return signal[SUBSCRIBE](callback);
-}
-
-export function useSelector<T, K>(signal: SignalRW<T>, selector: (value: T) => K): K;
-export function useSelector<T>(signal: SignalRW<T>): T;
-export function useSelector<T>(selector: () => T): T;
-export function useSelector<T, K>(signal: SignalRW<T> | (() => T), selector?: (value: T) => K) {
-    const isSignal = SUBSCRIBE in signal;
-    const snapshotSignal = (isSignal ? signal : rootSignal) as SignalRW<T>;
-    const snapshotSelector = selector || (isSignal ? null : signal);
-
-    return useSyncExternalStore(
-        snapshotSignal[SUBSCRIBE],
-        useMemo(() => {
-            if (snapshotSelector) {
-                let value: any = {};
-                let selected: T | K;
+                callbacks.add(callback);
 
                 return () => {
-                    const nextValue = snapshotSignal();
+                    if (callbacks) {
+                        callbacks.delete(callback);
 
-                    if (nextValue === value) {
-                        return selected;
+                        if (!callbacks.size) {
+                            callbacks = null;
+                        }
                     }
-
-                    value = nextValue;
-                    selected = snapshotSelector(nextValue);
-
-                    return selected;
                 };
+            },
+        },
+    );
+};
+
+let clock = {};
+
+const clockUpdateEvent = createEvent();
+
+export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
+    const event = createEvent<T>();
+    let value = typeof initialValue === 'function' ? (initialValue as () => T)() : initialValue;
+
+    return Object.assign(
+        (...args: [] | [nextValue: T | ((value: T) => T)]) => {
+            if (args.length) {
+                const nextValue = typeof args[0] === 'function' ? (args[0] as (value: T) => T)(value) : args[0];
+
+                if (nextValue !== value) {
+                    value = nextValue;
+                    event(value);
+                    clock = {};
+                    clockUpdateEvent();
+                }
+
+                return;
             }
 
-            return snapshotSignal;
-        }, [snapshotSignal, snapshotSelector]),
+            return value;
+        },
+        { on: event.on },
+    ) as Signal<T>;
+};
+
+export const useSelector = <T>(signal: Signal<T> | (() => T)) =>
+    useSyncExternalStore(
+        'on' in signal ? signal.on : clockUpdateEvent.on,
+        useMemo(() => {
+            if ('on' in signal) {
+                return signal;
+            }
+
+            let lastClock: typeof clock | null = null;
+            let value: T;
+
+            return () => {
+                if (clock !== lastClock) {
+                    lastClock = clock;
+                    value = signal();
+                }
+
+                return value;
+            };
+        }, [signal]),
     );
-}

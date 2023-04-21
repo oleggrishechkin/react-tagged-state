@@ -7,9 +7,9 @@
 [![NPM total downloads](https://img.shields.io/npm/dt/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-tagged-state?minimal=true)
 [![NPM monthly downloads](https://img.shields.io/npm/dm/react-tagged-state.svg?style=flat)](https://npmcharts.com/compare/react-tagged-state?minimal=true)
 
-⚛️ Experimental global atomic state manager
+⚛️ Global atomic state manager
 
-**React Tagged State** uses signals API as [SolidJS](https://www.solidjs.com/) and [S.js](https://github.com/adamhaile/S) but without smart reactivity with effects and computed.
+**React Tagged State** uses signals API as [SolidJS](https://www.solidjs.com/) and [S.js](https://github.com/adamhaile/S) but without automatic deps tracking.
 
 ## Basic Usage
 
@@ -19,16 +19,19 @@ import {
   useSelector,
 } from 'react-tagged-state';
 
+// create a signal
 const counter = createSignal(0);
 
 const Counter = () => {
+  // read value
   const count = useSelector(counter);
 
   return (
     <button
-      onClick={() =>
+      onClick={() => {
+        // update value
         counter((value) => value + 1)
-      }
+      }}
     >
       {count}
     </button>
@@ -38,21 +41,15 @@ const Counter = () => {
 
 ## API Overview
 
-### createSignal
+### Signal
 
-Create a signal by calling `createSignal` with initial value:
-
-```typescript jsx
-import { createSignal } from 'react-tagged-state';
-
-const counter = createSignal(0);
-```
-
-Read value by calling a signal without arguments, write value by calling a signal with new value:
+Signal is a value container. And also is just a function.
+You can read value by calling signal without arguments and write value by calling signal with next value. Simple.
 
 ```typescript jsx
 import { createSignal } from 'react-tagged-state';
 
+// create a signal
 const counter = createSignal(0);
 
 // read
@@ -65,43 +62,25 @@ counter(10);
 counter((count) => count + 1);
 ```
 
-You can create an event like signal by calling `createSignal` without initial value:
+### Event
+
+Event is a "write-only" signal. You can't read value, but you can dispatch next value.
 
 ```typescript jsx
-import { createSignal } from 'react-tagged-state';
+import { createEvent } from 'react-tagged-state';
 
-const reset = createSignal();
-```
+// create an event
+const reset = createEvent();
 
-Dispatch event by calling a signal:
-
-```typescript
-import { createSignal } from 'react-tagged-state';
-
-const reset = createSignal();
-
+// dispatch
 reset();
 ```
 
-You can dispatch some payload too:
+### React & Hooks
 
-```typescript
-import { createSignal } from 'react-tagged-state';
+`useSelector` bind signals with component. This is all what you need to sync signals with yuor components. You can use signals or selectors like you do in redux, of course.
 
-const reduxLikeDispatch = createSignal<{
-  type: sring;
-  payload: any;
-}>();
-
-reduxLikeDispatch({
-  type: 'SET_COUNTER',
-  payload: 5,
-});
-```
-
-### useSelector
-
-Subscribe component to a signal by calling `useSelector`:
+Signal:
 
 ```typescript jsx
 import {
@@ -128,35 +107,7 @@ const Counter = () => {
 
 Component will be re-rendered on signal's value change.
 
-You can map value from signal:
-
-```typescript jsx
-import {
-  createSignal,
-  useSelector,
-} from 'react-tagged-state';
-
-const items = createSignal<
-  Partial<
-    Record<string, { id: string; title: string }>
-  >
->({ id: { id: '0', title: 'title' } });
-
-const Item = ({ itemId }: { itemId: string }) => {
-  const item = useSelector(
-    items,
-    (value) => value[itemId],
-  );
-
-  if (!item) {
-    return null;
-  }
-
-  return <div>{item.title}</div>;
-};
-```
-
-Selectors supported too:
+Selector:
 
 ```typescript jsx
 import {
@@ -181,17 +132,11 @@ const Item = ({ itemId }: { itemId: string }) => {
 };
 ```
 
-Component will be re-rendered on selected/mapped value change.
+Component will be re-rendered on selected value change.
 
-> 💡 Your selector/map function may be called frequently so keep it as simple as possible. You can move heavy computations to `useMemo`.
-> 
-> Rules:<br>
-> - selector function will be called on any signal change/on each render.<br>
-> - map function will be called on provided signal change/on each render.
+### Subscription
 
-### subscribe
-
-Subscribe to a signal by calling `subscribe` with signal and callback:
+Signals and events have `on` method. You can use this method to subscribe to signals and events outside your components or in `useEffect`.
 
 ```typescript jsx
 import {
@@ -201,15 +146,14 @@ import {
 
 const counter = createSignal(0);
 
-const unsubscribe = subscribe(
-  counter,
+const unsubscribe = counter.on(
   (value) => {
     console.log(value);
   },
 );
 ```
 
-Callback will be called on signal's value change.
+Callback will be called on signal's value change or event's dispatch.
 
 ## Example
 
