@@ -7,9 +7,19 @@ export interface Event<T> {
 
 export interface Signal<T> {
     (): T;
-    (nextValue: T | ((value: T) => T)): void;
+    (nextValue: T | ((value: T) => T)): T;
     on: (callback: (value: T) => void) => () => void;
 }
+
+export interface UseSelector {
+    <T>(signal: Signal<T>): T;
+    <T, K>(signal: Signal<T>, selector: (value: T) => K): K;
+    <T>(selector: () => T): T;
+}
+
+const EMPTY = {};
+
+let clock = {};
 
 export const createEvent = <T = void>(): Event<T> => {
     let callbacks: Set<(value: T) => void> | null = null;
@@ -44,8 +54,6 @@ export const createEvent = <T = void>(): Event<T> => {
     );
 };
 
-let clock = {};
-
 const clockUpdateEvent = createEvent();
 
 export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
@@ -63,8 +71,6 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
                     clock = {};
                     clockUpdateEvent();
                 }
-
-                return;
             }
 
             return value;
@@ -73,15 +79,31 @@ export const createSignal = <T>(initialValue: T | (() => T)): Signal<T> => {
     ) as Signal<T>;
 };
 
-export const useSelector = <T>(signal: Signal<T> | (() => T)) =>
+export const useSelector: UseSelector = <T, K>(signal: Signal<T> | (() => T), selector?: (value: T) => K) =>
     useSyncExternalStore(
         'on' in signal ? signal.on : clockUpdateEvent.on,
-        useMemo(() => {
+        useMemo<() => T | K>(() => {
             if ('on' in signal) {
+                if (selector) {
+                    let lastSignalValue: T | typeof EMPTY = EMPTY;
+                    let value: K;
+
+                    return () => {
+                        const nextSignalValue = signal();
+
+                        if (nextSignalValue !== lastSignalValue) {
+                            lastSignalValue = nextSignalValue;
+                            value = selector(nextSignalValue);
+                        }
+
+                        return value;
+                    };
+                }
+
                 return signal;
             }
 
-            let lastClock: typeof clock | null = null;
+            let lastClock: typeof clock | typeof EMPTY = EMPTY;
             let value: T;
 
             return () => {
@@ -92,5 +114,5 @@ export const useSelector = <T>(signal: Signal<T> | (() => T)) =>
 
                 return value;
             };
-        }, [signal]),
+        }, [selector, signal]),
     );
