@@ -134,6 +134,35 @@ const Item = ({ itemId }: { itemId: string }) => {
 
 Component will be re-rendered on selected value change.
 
+Signal's Selector:
+
+```typescript jsx
+import {
+  createSignal,
+  useSelector,
+} from 'react-tagged-state';
+
+const items = createSignal<
+  Partial<
+    Record<string, { id: string; title: string }>
+  >
+>({ id: { id: '0', title: 'title' } });
+
+const Item = ({ itemId }: { itemId: string }) => {
+  const item = useSelector(items, () => items[itemId]);
+
+  if (!item) {
+    return null;
+  }
+
+  return <div>{item.title}</div>;
+};
+```
+
+Component will be re-rendered on selected value change.
+This variant subscribes only to provided signal's changes.
+You should prefer this way if selector read value from single signal.
+
 ### Subscription
 
 Signals and events have `on` method. You can use this method to subscribe to signals and events outside your components or in `useEffect`.
